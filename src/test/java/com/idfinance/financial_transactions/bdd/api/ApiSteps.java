@@ -1,6 +1,8 @@
 package com.idfinance.financial_transactions.bdd.api;
 
 import com.idfinance.financial_transactions.SettableClock;
+import com.idfinance.financial_transactions.bdd.support.WireMockRatesConfiguration.HttpRatesStub;
+import com.idfinance.financial_transactions.entity.ExpenseTransaction;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
@@ -65,6 +67,8 @@ class ApiSteps {
 	@Autowired
 	private RestClient.Builder restClientBuilder;
 	@Autowired
+	private HttpRatesStub ratesStub;
+	@Autowired
 	private Environment environment;
 	private String accountFrom;
 	private String category;
@@ -80,6 +84,10 @@ class ApiSteps {
 		this.expenseTransactionRepository.deleteAll();
 		this.expenseLimitRepository.deleteAll();
 		this.currencyRateRepository.deleteAll();
+		// The stubs are rebuilt too: a scenario that published a rate must not leave it
+		// behind for
+		// the next one, which is the same leak the database rows would be.
+		this.ratesStub.reset();
 		this.response = null;
 		this.responseBody = null;
 	}
@@ -212,6 +220,92 @@ class ApiSteps {
 				ordinal)).startsWith(isoDate);
 		((StringAssert) softly.assertThat(row.get("limitCurrencyShortname").asText())
 				.as("the limit currency of the %s row", ordinal)).isEqualTo(currency);
+		softly.assertAll();
+	}
+
+	@When("the limits of the account are requested")
+	void theLimitsAreRequested() {
+		this.response = exchange(this.client().get().uri("/api/v1/limits?account_from=" + this.accountFrom));
+		this.responseBody = readBody();
+	}
+
+	@Then("the response holds {int} limits")
+	void theResponseHoldsLimits(int expected) {
+		Assertions.assertThat(this.responseBody.isArray()).as("the response body is a JSON array").isTrue();
+		Assertions.assertThat(this.responseBody.size()).as("the number of limits").isEqualTo(expected);
+	}
+
+	@Then("the limit for {string} reports {string} spent and {string} remaining")
+	void theLimitReports(String category, String spent, String remaining) {
+		JsonNode row = null;
+		for (JsonNode candidate : this.responseBody) {
+			if (category.equals(candidate.get("expenseCategory").asText())) {
+				row = candidate;
+			}
+		}
+		Assertions.assertThat(row).as("a limit for the category %s", category).isNotNull();
+
+		// spent and remaining come from one joined query now rather than a lookup per
+		// limit, so this is
+		// the assertion that would notice the aggregation being dropped or the join
+		// losing the category.
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(row.get("spentUsd").decimalValue()).as("the month's total against the limit")
+				.isEqualByComparingTo(new BigDecimal(spent));
+		softly.assertThat(row.get("remaining").decimalValue()).as("limitSum minus spentUsd")
+				.isEqualByComparingTo(new BigDecimal(remaining));
+		softly.assertThat(row.get("limitCurrencyShortname").asText()).as("the ledger currency of the limit")
+				.isEqualTo("USD");
+		softly.assertAll();
+	}
+
+	@Given(value = "the provider answers {string} against {string} at {string} on {string}")
+	void theProviderAnswers(String base, String quote, String close, String isoDate) {
+		this.ratesStub.closeOn(base, quote, LocalDate.parse(isoDate), new BigDecimal(close));
+	}
+
+	@Given(value = "the provider has no close for {string} against {string} on {string} and offers {string} instead")
+	void theProviderOffersPreviousClose(String base, String quote, String isoDate, String previousClose) {
+		this.ratesStub.previousCloseOn(base, quote, LocalDate.parse(isoDate), new BigDecimal(previousClose));
+	}
+
+	@Given("the provider is unreachable")
+	void theProviderIsUnreachable() {
+		this.ratesStub.failing();
+	}
+
+	@Then(value = "the provider was asked for the symbol {string}")
+	void theProviderWasAskedFor(String symbol) {
+		Assertions.assertThat(this.ratesStub.requestedSymbols()).as("the symbols the adapter requested")
+				.contains(symbol);
+	}
+
+	@Then(value = "the only transaction is converted at {string} USD")
+	void theOnlyTransactionIsConvertedAt(String ledgerSum) {
+		List<ExpenseTransaction> stored = this.expenseTransactionRepository.findAll();
+		Assertions.assertThat(stored).as("transactions stored").hasSize(1);
+		ExpenseTransaction transaction = stored.getFirst();
+
+		// One assertion about the stored row rather than about the response: the ledger
+		// amount is
+		// what the conversion produced, and reading it back is what proves the rate
+		// reached the
+		// adapter, was parsed out of the provider's JSON and landed on the row.
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(transaction.getSumInLedger()).as("sum multiplied by the rate the provider gave")
+				.isEqualByComparingTo(new BigDecimal(ledgerSum));
+		softly.assertThat(transaction.isFlagCalculated()).as("a converted transaction has a calculated flag").isTrue();
+		softly.assertAll();
+	}
+
+	@Then("the only transaction is stored without a flag")
+	void theOnlyTransactionIsStoredWithoutAFlag() {
+		List<ExpenseTransaction> stored = this.expenseTransactionRepository.findAll();
+		Assertions.assertThat(stored).as("an unreachable provider loses the rate, not the transaction").hasSize(1);
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(stored.getFirst().isFlagCalculated()).as("no flag was calculated").isFalse();
+		softly.assertThat(stored.getFirst().getLimitExceeded()).as("and no verdict was invented").isNull();
+		softly.assertThat(stored.getFirst().getSumInLedger()).as("the ledger amount stays absent").isNull();
 		softly.assertAll();
 	}
 

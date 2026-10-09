@@ -53,11 +53,6 @@ public final class TransactionController {
 	@ApiResponse(responseCode = "400", description = "The body failed validation", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "Unknown category or currency", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
-	// The numbers live under app.rate-limits.ingestion; this only marks the
-	// endpoint as limited, and its own
-	// values are the fallback. The quota is per calling address, not per account —
-	// see RateLimitInterceptor for
-	// why the account is not available here.
 	@RateLimited(quota = "ingestion")
 	@PostMapping
 	ResponseEntity<TransactionResponse> accept(@Valid @RequestBody TransactionRequest request) {

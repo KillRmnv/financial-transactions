@@ -62,22 +62,12 @@ public final class LimitController {
 	@ApiResponse(responseCode = "400", description = "The body failed validation", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "Unknown category", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
-	// Installing writes a row, so it is limited too, but far more generously than
-	// ingestion: a client
-	// is not expected to change limits in a loop. No per-account key here —
-	// accountFrom arrives in the
-	// JSON body, and reading it would mean deserialising the body just to look up a
-	// quota.
 	@RateLimited(quota = "limit-install")
 	@PostMapping("/limits")
 	ResponseEntity<LimitResponse> install(@Valid @RequestBody LimitRequest request) {
 		String accountFrom = request.accountFrom();
 		var installed = limitService.install(request);
 
-		// The response is read back through the reporting service rather than assembled
-		// from the
-		// entity, so that "what a limit looks like on the wire" has exactly one
-		// definition.
 		LimitResponse body = reportingService.limitRowOf(accountFrom, installed.getId())
 				.map(row -> toResponse(accountFrom, row)).orElseThrow();
 

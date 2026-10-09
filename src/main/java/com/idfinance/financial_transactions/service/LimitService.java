@@ -12,7 +12,6 @@ import com.idfinance.financial_transactions.repository.ExpenseCategoryRepository
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -81,12 +80,6 @@ public class LimitService {
 	private Currency ledgerCurrency() {
 		String code = this.ledgerPolicy.currencyCode();
 		return this.currencyRepository.findByCode(code).orElseThrow(() -> NotFoundException.currency(code));
-	}
-
-	/** For tests and diagnostics: every limit installed for the account. */
-	@Transactional(readOnly = true)
-	public List<ExpenseLimit> allForAccount(String accountFrom) {
-		return this.expenseLimitRepository.findAllForAccount(accountFrom);
 	}
 
 }

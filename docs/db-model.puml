@@ -1,0 +1,194 @@
+@startuml db-model
+' =============================================================================
+' Martin notation (crow's foot) — relationships as the schema declares them.
+'
+' Source of truth: src/main/resources/db/migration/V1__init.sql
+' Rendered from the migration, not from the JPA entities, because the schema is
+' what a database actually enforces and the two are not identical: the entities
+' model currency_rate.source and applied_rate, and the entity layer has no idea
+' about the partial unique indexes.
+'
+' NOTATION
+'   ||   exactly one        o|   zero or one
+'   |{   one or more        o{   zero or more
+'
+' A marker sits next to the entity it counts. On
+'   "expense_limit o|--o{ expense_transaction"
+' the o| means each transaction points at zero or one limit, and the o{ means a
+' limit may be pointed at by zero or many transactions.
+' =============================================================================
+
+hide circle
+skinparam linetype ortho
+skinparam defaultFontSize 12
+skinparam nodesep 55
+skinparam ranksep 80
+
+' The lookups sit above the facts they are referenced by, which is the direction
+' every foreign key points. Top to bottom is reference data -> fact.
+package "lookup" {
+  entity "currency" as currency {
+    id           : smallserial   <<PK>>
+    --
+    code         : varchar(3)    <<UQ, FK target>>
+    display_name : varchar(64)
+    created_at   : timestamptz
+    --
+    note right
+      Referenced by its natural key
+      code from currency_pair and
+      currency_rate, and by its
+      surrogate id from the two
+      expense tables.
+    end note
+  }
+
+  entity "expense_category" as expense_category {
+    id           : smallserial   <<PK>>
+    --
+    code         : varchar(32)   <<UQ>>
+    display_name : varchar(128)
+  }
+}
+
+package "rates" {
+  entity "currency_rate" as currency_rate {
+    id             : bigserial      <<PK>>
+    --
+    base_currency  : varchar(3)     <<FK>>
+    rate_date      : date
+    close          : numeric(19,8)  *
+    previous_close : numeric(19,8)  *
+    source         : varchar(32)
+    fetched_at     : timestamptz
+    --
+    note right
+      Unique (base_currency, rate_date).
+      Only the base side of a pair is
+      stored; the quote is implied by
+      the ledger currency.
+    end note
+  }
+
+  entity "currency_pair" as currency_pair {
+    id            : bigserial   <<PK>>
+    --
+    base_currency : varchar(3)  <<FK>>
+    active        : boolean
+    created_at    : timestamptz
+    --
+    note right
+      Operational data, not configuration:
+      which bases the daily sweep warms.
+      An unlisted currency is still
+      accepted in a transaction, its
+      rate is just fetched on demand.
+    end note
+  }
+}
+
+package "spend" {
+  entity "expense_limit" as expense_limit {
+    id           : bigserial     <<PK>>
+    --
+    account_from : varchar(10)
+    category_id  : smallint      <<FK>>
+    currency_id  : smallint      <<FK>>
+    sum          : numeric(14,2)
+    created_at   : timestamptz
+    is_default   : boolean
+    --
+    note right
+      Append only: the specification
+      forbids updating a limit. There
+      is no unique on (account, category)
+      for that reason -- the limit in
+      effect is the latest created_at.
+
+      Partial unique index
+      ux_expense_limit_default on
+      (account_from, category_id)
+      where is_default is what makes
+      the automatic fallback idempotent
+      under ON CONFLICT DO NOTHING.
+    end note
+  }
+
+  entity "expense_transaction" as expense_transaction {
+    id              : bigserial        <<PK>>
+    --
+    account_from    : varchar(10)
+    account_to      : varchar(10)
+    currency_id     : smallint         <<FK>>
+    sum             : numeric(14,2)
+    category_id     : smallint         <<FK>>
+    occurred_at     : timestamptz
+    occurred_month  : date
+    --
+    ledger_sum      : numeric(14,2)    *
+    applied_rate    : numeric(19,8)    *
+    rate_date       : date             *
+    limit_id        : bigint           <<FK>>    *
+    limit_exceeded  : boolean          *
+    --
+    flag_calculated : boolean
+    created_at      : timestamptz
+    --
+    note right
+      The star marks a nullable column.
+      ledger_sum, applied_rate,
+      rate_date and limit_exceeded go
+      null together when no rate was
+      available; flag_calculated then
+      says so explicitly.
+
+      rate_date is NOT a foreign key to
+      currency_rate. It records the date
+      of the rate that was applied, kept
+      as a snapshot so the row stays
+      readable when the rate table is
+      later overwritten.
+    end note
+  }
+}
+
+' -----------------------------------------------------------------------------
+' Relationships
+' -----------------------------------------------------------------------------
+
+currency ||--o{ expense_transaction : "denominated in"
+currency ||--o{ expense_limit       : "denominated in"
+expense_category ||--o{ expense_transaction : "classified as"
+expense_category ||--o{ expense_limit       : "scoped to"
+currency ||--o{ currency_rate   : "has a daily rate for"
+currency ||--o| currency_pair   : "is swept for"
+
+' limit_id is nullable, so the "one" side of this one is zero-or-one as well.
+' PlantUML writes that as |o on the left and o| on the right; the order flips
+' depending on which end of the line the marker is on.
+expense_limit |o--o{ expense_transaction : "was measured against"
+
+' -----------------------------------------------------------------------------
+' What is deliberately not an entity, and why.
+' -----------------------------------------------------------------------------
+note bottom of expense_transaction #EEE
+  No account table.
+  account_from and account_to are varchar(10) with a digit CHECK. The
+  specification says exactly one thing about an account, and it is that it is a
+  ten digit string. That describes a field format, not an entity. Normalising
+  them would need facts nobody specified: who owns the account, its currency,
+  whether it is open.
+
+  Consequently expense_limit.account_from and expense_transaction.account_from
+  are not joined by a foreign key. They meet in application code, and the
+  monthly total is a GROUP BY rather than a join.
+end note
+
+note bottom of currency_rate #EEE
+  currency_rate is not joined to currency_pair.
+  They agree by convention, not by constraint: currency_pair says which bases
+  are swept, currency_rate says what was fetched. A sweep inserts into one and
+  the other only as a consequence.
+end note
+
+@enduml

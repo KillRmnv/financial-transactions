@@ -56,3 +56,37 @@ Feature: The client-facing API over HTTP
     When a transaction in the category "gold" for "10.00" USD happened on "2022-01-02"
     Then the response is 404
     And the response is a problem of type "not-found"
+
+  Scenario: The limits of an account come back with what the month has spent against them
+    Given a limit of "2000" USD was installed on "2022-01-01"
+    And a transaction of "500" USD happened on "2022-01-02"
+    And a transaction of "600" USD happened on "2022-01-03"
+    When the limits of the account are requested
+    Then the response is 200
+    And the response holds 1 limits
+    And the limit for "product" reports "1100" spent and "900" remaining
+
+  Scenario: A rate published by the provider converts the transaction over the wire
+    Given the account "0000000456" and the category "product"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And a limit of "2000" USD was installed on "2022-01-01"
+    When a transaction in "KZT" for "400" USD happened on "2022-01-05"
+    Then the response is 201
+    And the provider was asked for the symbol "KZT/USD"
+    And the only transaction is converted at "1.00" USD
+
+  Scenario: A day with no close of its own falls back to the provider's previous close
+    Given the account "0000000457" and the category "product"
+    And the provider has no close for "KZT" against "USD" on "2022-01-01" and offers "0.0025" instead
+    And a limit of "2000" USD was installed on "2022-01-01"
+    When a transaction in "KZT" for "400" USD happened on "2022-01-05"
+    Then the response is 201
+    And the only transaction is converted at "1.00" USD
+
+  Scenario: An unreachable provider costs the rate, not the transaction
+    Given the account "0000000458" and the category "product"
+    And the provider is unreachable
+    And a limit of "2000" USD was installed on "2022-01-01"
+    When a transaction in "KZT" for "400" USD happened on "2022-01-05"
+    Then the response is 201
+    And the only transaction is stored without a flag

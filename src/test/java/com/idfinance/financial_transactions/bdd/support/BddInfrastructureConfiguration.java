@@ -1,7 +1,6 @@
 package com.idfinance.financial_transactions.bdd.support;
 
 import com.idfinance.financial_transactions.SettableClock;
-import com.idfinance.financial_transactions.config.LedgerPolicy;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -11,22 +10,25 @@ import org.springframework.web.client.RestClient;
 
 /**
  * The infrastructure every BDD suite needs: a clock the scenarios can move, and
- * a rates provider that answers without a network.
+ * a builder for the HTTP client the scenarios drive the API with.
  *
  * <p>
  * Boot 4 contributes no {@code RestClient.Builder} bean of its own, so the HTTP
- * suite gets one here rather than assuming it exists.
+ * suites get one here rather than assuming it exists.
  *
  * <p>
- * The provider is a stub in every sense: it holds a
- * {@link StubRatesProvider.Mode} a scenario sets, and only the ledger currency
- * needs no rate at all. A transaction in any other currency falls through to
- * the real lookup order, which is what the currency and conversion scenarios
- * assert on.
+ * The rates provider is deliberately not here. A suite either stubs it
+ * in-process or points the real client at a WireMock server, and which one it
+ * is decides what the suite actually exercises — see {@link StubRatesProvider}
+ * and {@link WireMockRatesConfiguration}.
  */
-
 @TestConfiguration(proxyBeanMethods = false)
 public class BddInfrastructureConfiguration {
+
+	/**
+	 * Starts in 2026, which is after every transaction date the features use, so a
+	 * scenario that forgets to move it fails rather than passing by accident.
+	 */
 	@Bean
 	@Primary
 	public SettableClock settableClock() {
@@ -35,13 +37,8 @@ public class BddInfrastructureConfiguration {
 
 	@Bean
 	@Primary
-	public StubRatesProvider stubRatesProvider(LedgerPolicy ledgerPolicy) {
-		return new StubRatesProvider(ledgerPolicy);
-	}
-
-	@Bean
-	@Primary
 	public RestClient.Builder restClientBuilder() {
 		return RestClient.builder();
 	}
+
 }

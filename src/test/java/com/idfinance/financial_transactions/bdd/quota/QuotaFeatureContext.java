@@ -2,6 +2,7 @@ package com.idfinance.financial_transactions.bdd.quota;
 
 import com.idfinance.financial_transactions.TestcontainersConfiguration;
 import com.idfinance.financial_transactions.bdd.support.BddInfrastructureConfiguration;
+import com.idfinance.financial_transactions.bdd.support.StubRatesConfiguration;
 import io.cucumber.spring.CucumberContextConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -25,7 +26,7 @@ import org.springframework.test.context.TestPropertySource;
 
 @CucumberContextConfiguration
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(value = {TestcontainersConfiguration.class, BddInfrastructureConfiguration.class})
+@Import(value = {TestcontainersConfiguration.class, BddInfrastructureConfiguration.class, StubRatesConfiguration.class})
 @TestPropertySource(properties = {"app.rate-limits.ingestion.limit-for-period=3",
 		"app.rate-limits.ingestion.limit-refresh-period=1h", "app.rate-limits.ingestion.retry-after-seconds=1"})
 public class QuotaFeatureContext {

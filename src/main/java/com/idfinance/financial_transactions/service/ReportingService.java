@@ -7,6 +7,7 @@ import com.idfinance.financial_transactions.entity.ExpenseTransaction;
 import com.idfinance.financial_transactions.repository.ExpenseCategoryRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
+import com.idfinance.financial_transactions.repository.LimitReportRow;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -48,19 +49,30 @@ public class ReportingService {
 
 	@Transactional(readOnly = true)
 	public List<LimitRow> limitsOf(String accountFrom) {
+		return reportOf(accountFrom);
+	}
+
+	/**
+	 * One statement for the whole report, so listing a hundred limits is still one
+	 * round trip rather than a hundred and one.
+	 */
+	private List<LimitRow> reportOf(String accountFrom) {
 		LocalDate month = currentMonth();
-		return this.expenseLimitRepository.findAllForAccount(accountFrom).stream().map(limit -> toRow(limit, month))
-				.toList();
+		return this.expenseLimitRepository.reportForAccount(accountFrom, month).stream().map(this::toRow).toList();
 	}
 
 	/**
 	 * One limit by id, used to answer the install call without a second definition
 	 * of the shape.
+	 *
+	 * <p>
+	 * Answered from the same report as the listing rather than from
+	 * {@code findById}, so the installed response and the list response cannot
+	 * describe the same limit differently.
 	 */
 	@Transactional(readOnly = true)
 	public Optional<LimitRow> limitRowOf(String accountFrom, Long limitId) {
-		return this.expenseLimitRepository.findById(limitId).filter(limit -> limit.getAccountFrom().equals(accountFrom))
-				.map(limit -> toRow(limit, currentMonth()));
+		return reportOf(accountFrom).stream().filter(row -> row.id().equals(limitId)).findFirst();
 	}
 
 	/**
@@ -85,11 +97,19 @@ public class ReportingService {
 				limitsById.get(transaction.getLimitId()))).toList();
 	}
 
-	private LimitRow toRow(ExpenseLimit limit, LocalDate month) {
-		BigDecimal spent = this.expenseTransactionRepository.sumInLedgerForMonth(limit.getAccountFrom(),
-				limit.getCategoryId(), month);
-		return new LimitRow(limit.getId(), categoryCode(limit.getCategoryId()), limit.getSum(), installedAt(limit),
-				spent, limit.getSum().subtract(spent), limit.getCurrency().getCode());
+	/**
+	 * The report already carries the category and the currency, so the row is
+	 * assembled rather than read. The epoch is turned into a null here: a limit
+	 * dated 1 January 1970 is what the standing fallback looks like in the
+	 * database, and telling a client that would be worse than telling it nothing.
+	 */
+	private LimitRow toRow(LimitReportRow row) {
+		OffsetDateTime installedAt = row.getLimitDatetime().equals(Instant.EPOCH)
+				? null
+				: row.getLimitDatetime().atZone(this.zone).toOffsetDateTime();
+		BigDecimal spent = row.getSpent();
+		return new LimitRow(row.getId(), row.getExpenseCategory(), row.getLimitSum(), installedAt, spent,
+				row.getLimitSum().subtract(spent), row.getCurrencyShortname());
 	}
 
 	private ExceededRow toRow(ExpenseTransaction transaction, String expenseCategory, ExpenseLimit limit) {
@@ -115,6 +135,16 @@ public class ReportingService {
 		return transaction.getAccountFrom();
 	}
 
+	/**
+	 * Still a lookup per row on the exceeded path, where the rows carry only a
+	 * category id.
+	 *
+	 * <p>
+	 * It could join instead, and {@code reportForAccount} shows how, but the
+	 * exceeded report is read once per client request over a month's rows, not per
+	 * limit, so the count does not grow with the account's history the way the
+	 * limit report's did.
+	 */
 	private String categoryCode(Long categoryId) {
 		return this.expenseCategoryRepository.findById(categoryId).map(ExpenseCategory::getCode).orElse(null);
 	}
