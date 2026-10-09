@@ -1,0 +1,39 @@
+# Production overrides. Everything here is a value that differs from the default because the default is
+# wrong in production, not because it reads better on a screen.
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+  threads:
+    # Left off on purpose. Virtual threads on Tomcat move the bottleneck to the JDBC pool: requests become
+    # unbounded while the pool stays at ten connections, so latency gets worse rather than better and the
+    # cause is not obvious from a dashboard. Turning it on is a change that needs the pool sized, the
+    # dashboards rewritten and the runbooks updated, so it is a decision rather than a flag.
+    virtual:
+      enabled: false
+
+  datasource:
+    hikari:
+      # Virtual threads and Hikari are the same decision: whichever way this goes, the pool is the real
+      # limit on how much work can be in flight. Sized above the default of ten because every request that
+      # touches the flag holds a connection while it does so.
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 5000
+
+logging:
+  level:
+    com.idfinance.financial_transactions: INFO
+    # Hibernate's statement log is off by default: it is a firehose, not a diagnostic, and the useful
+    # version of the same information is the slow-query log on the database.
+    org.hibernate.SQL: WARN
+
+management:
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      # Lets a single dashboard hold several deployments without re-labelling anything.
+      environment: ${DEPLOYMENT_ENVIRONMENT:production}

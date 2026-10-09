@@ -1,0 +1,29 @@
+# Development overrides. Activate with SPRING_PROFILES_ACTIVE=dev, or `spring-boot:run -Dspring-boot.run.profiles=dev`.
+#
+# It deliberately relaxes the quotas rather than tightening them: a developer driving the API by hand
+# wants to be refused once so they see the 429, not sixty times a minute.
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+logging:
+  level:
+    com.idfinance.financial_transactions: DEBUG
+
+app:
+  rate-limits:
+    ingestion:
+      limit-for-period: 10000
+      limit-refresh-period: 1s
+    limit-install:
+      limit-for-period: 10000
+      limit-refresh-period: 1s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # The heapdump endpoint is exposed here and nowhere else. It is a full dump of the process, so in
+        # any shared environment it hands over whatever is in memory: credentials, tokens, customer rows.
+        include: health,info,metrics,prometheus,heapdump
