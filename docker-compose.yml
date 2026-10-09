@@ -1,0 +1,63 @@
+# Optional convenience stack: Postgres + Redis + the service.
+#
+#   docker compose up -d db redis
+#   SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/financial \
+#   SPRING_DATASOURCE_USERNAME=financial \
+#   SPRING_DATASOURCE_PASSWORD=financial \
+#   SPRING_DATA_REDIS_HOST=localhost ./mvnw spring-boot:run
+#
+# Or bring up everything, service included:
+#
+#   docker compose up --build -d
+#
+# Credentials come from the environment (see .env.example), so nothing secret is committed.
+# The test suite does NOT use this file: Testcontainers provides both containers.
+
+services:
+
+  db:
+    image: postgres:16
+    container_name: financial-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-financial}
+      POSTGRES_USER: ${POSTGRES_USER:-financial}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-financial}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-financial} -d ${POSTGRES_DB:-financial}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: financial-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: financial-app
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-financial}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-financial}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-financial}
+      SPRING_DATA_REDIS_HOST: redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  db-data:
