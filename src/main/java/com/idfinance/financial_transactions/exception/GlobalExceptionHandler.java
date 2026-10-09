@@ -166,6 +166,10 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 			case NotFoundException ignored -> HttpStatus.NOT_FOUND;
 			case RateNotFoundException ignored -> HttpStatus.UNPROCESSABLE_ENTITY;
 			case ExternalServiceUnavailableException ignored -> HttpStatus.SERVICE_UNAVAILABLE;
+			// 503 and not 500: a contended row is the service being busy, and a 500 tells
+			// the caller
+			// the service is broken. The distinction decides whether a client retries.
+			case LockUnavailableException ignored -> HttpStatus.SERVICE_UNAVAILABLE;
 			default -> HttpStatus.INTERNAL_SERVER_ERROR;
 		};
 	}

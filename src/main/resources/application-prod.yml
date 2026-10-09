@@ -21,6 +21,18 @@ spring:
 
   datasource:
     hikari:
+      # How long a transaction waits for a row lock before giving up. PostgreSQL's default is 0, which
+      # means "forever", and under contention that is worse than slow: the request holds a Tomcat thread,
+      # a pool connection and a client socket while nothing is going to release the row.
+      #
+      # It applies to every lock wait in the session, not only ours — including the one in the flight's
+      # own insert of a default limit, and the one Flyway may hit on a DDL lock. Both are the same
+      # bargain: a bounded wait that fails visibly rather than an unbounded one that disappears.
+      #
+      # Prod only. In tests it stays 0 so that a concurrency scenario fails on a wrong flag rather than
+      # on a timeout, which would make the flakiness depend on how loaded the machine is.
+      connection-init-sql: SET lock_timeout = '3s'
+
       # The pool and the thread count below are one decision with two numbers, and neither is right on
       # its own. The pool is the scarce resource: twenty connections, because every request that touches
       # the flag holds one while it does, and a contended one holds it longer waiting on the row lock.

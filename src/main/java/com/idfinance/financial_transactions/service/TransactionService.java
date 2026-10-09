@@ -7,6 +7,7 @@ import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.ExpenseCategory;
 import com.idfinance.financial_transactions.entity.ExpenseLimit;
 import com.idfinance.financial_transactions.entity.ExpenseTransaction;
+import com.idfinance.financial_transactions.exception.LockUnavailableException;
 import com.idfinance.financial_transactions.exception.NotFoundException;
 import com.idfinance.financial_transactions.mapper.TransactionMapper;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -137,11 +139,7 @@ public class TransactionService {
 	 */
 	private void applyFlag(ExpenseTransaction transaction, ExpenseCategory category) {
 		ensureLimitExists(transaction, category);
-		ExpenseLimit limit = this.expenseLimitRepository
-				.lockEffectiveOn(transaction.getAccountFrom(), category.getId(), transaction.getOccurredAt())
-				.orElseThrow(() -> new IllegalStateException(
-						"No limit exists for account %s and category %s even after the default was ensured"
-								.formatted(transaction.getAccountFrom(), category.getCode())));
+		ExpenseLimit limit = lockEffectiveLimit(transaction, category);
 
 		BigDecimal spentBefore = this.expenseTransactionRepository.sumInLedgerForMonth(transaction.getAccountFrom(),
 				category.getId(), transaction.getOccurredMonth());
@@ -152,6 +150,36 @@ public class TransactionService {
 		this.metricsRecorder.transactionAccepted(exceeded ? FLAGGED : WITHIN_LIMIT);
 		log.info("Account {} spent {} of a {} {} limit this month; transaction {} exceeded", limit.getAccountFrom(),
 				runningTotal, limit.getSum(), category.getCode(), exceeded);
+	}
+
+	/**
+	 * Takes the lock, translating a timeout into a domain exception.
+	 *
+	 * <p>
+	 * The translation is here rather than in the handler because the handler
+	 * decides the status and must not know what a lock is. PostgreSQL's
+	 * {@code lock_timeout} — set through Hikari's {@code connection-init-sql} in
+	 * the {@code prod} profile — arrives here as
+	 * {@code CannotAcquireLockException}, which is a retryable "busy", not a broken
+	 * service.
+	 *
+	 * <p>
+	 * Without the {@code lock_timeout} the database would wait forever and this
+	 * catch would never fire, so the two are one decision: the bound is what makes
+	 * the failure visible instead of a pile-up.
+	 */
+	private ExpenseLimit lockEffectiveLimit(ExpenseTransaction transaction, ExpenseCategory category) {
+		try {
+			return this.expenseLimitRepository
+					.lockEffectiveOn(transaction.getAccountFrom(), category.getId(), transaction.getOccurredAt())
+					.orElseThrow(() -> new IllegalStateException(
+							"No limit exists for account %s and category %s even after the default was ensured"
+									.formatted(transaction.getAccountFrom(), category.getCode())));
+		} catch (CannotAcquireLockException ex) {
+			log.warn("Timed out waiting for the limit row of account {} and category {}", transaction.getAccountFrom(),
+					category.getCode());
+			throw new LockUnavailableException(transaction.getAccountFrom(), category.getCode());
+		}
 	}
 
 	/**
@@ -169,7 +197,7 @@ public class TransactionService {
 	 */
 	private void ensureLimitExists(ExpenseTransaction transaction, ExpenseCategory category) {
 		this.expenseLimitRepository.createDefaultIfAbsent(transaction.getAccountFrom(), category.getId(),
-				this.defaultLimitSum, ledgerCurrencyId());
+				this.defaultLimitSum, ledgerCurrencyId(), transaction.getOccurredAt());
 	}
 
 	/**

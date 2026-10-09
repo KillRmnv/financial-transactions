@@ -109,10 +109,11 @@ public interface ExpenseLimitRepository extends JpaRepository<ExpenseLimit, Long
 			where not exists (
 			    select 1 from expense_limit l
 			    where l.account_from = :accountFrom and l.category_id = :categoryId
+			      and l.created_at <= :at
 			)
 			on conflict do nothing
 			""", nativeQuery = true)
 	int createDefaultIfAbsent(@Param("accountFrom") String accountFrom, @Param("categoryId") Long categoryId,
-			@Param("sum") BigDecimal sum, @Param("currencyId") Long currencyId);
+			@Param("sum") BigDecimal sum, @Param("currencyId") Long currencyId, @Param("at") Instant at);
 
 }
