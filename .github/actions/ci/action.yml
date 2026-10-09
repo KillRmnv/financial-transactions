@@ -1,0 +1,41 @@
+name: 'Build financial-transactions'
+description: 'Checks out the repo and runs the fast build (compile, tests, format check).'
+
+inputs:
+  java-version:
+    description: 'JDK major version used for the build.'
+    required: false
+    default: '25'
+  maven-args:
+    description: 'Extra arguments passed to the Maven wrapper.'
+    required: false
+    default: '-B verify'
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the repository
+      uses: actions/checkout@v5
+
+    - name: Set up JDK ${{ inputs.java-version }}
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+        cache: maven
+
+    # Docker is preinstalled on ubuntu-latest, which is what Testcontainers needs.
+    - name: Report the container runtime
+      run: docker version --format '{{.Server.Version}}'
+
+    - name: Run the Maven wrapper
+      shell: bash
+      run: ./mvnw ${{ inputs.maven-args }}
+
+    - name: Upload the executable jar
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-jar
+        path: target/*.jar
+        if-no-files-found: error
+        retention-days: 7

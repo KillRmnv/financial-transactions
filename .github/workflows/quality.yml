@@ -1,0 +1,118 @@
+name: Quality
+
+# Slow path. These checks take minutes, so they must not sit in front of every commit:
+#   - workflow_dispatch  run them on demand from the Actions tab
+#   - schedule           nightly catch regressions
+#   - push to master     once the code is actually merged
+# Pull requests never trigger this workflow; the fast ci.yml gate is enough there.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/quality.yml'
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Run SpotBugs
+        run: ./mvnw -B spotbugs:check
+
+      - name: Run Spotless
+        run: ./mvnw -B spotless:check
+
+  image:
+    name: Build the Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Packaging the jar on the runner and copying it into the image avoids a second
+      # full Maven run inside the Docker build.
+      - name: Package the application
+        run: ./mvnw -B -DskipTests package
+
+      - uses: actions/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: financial-transactions:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The app refuses to start without a DataSource, so the smoke check needs a real
+      # Postgres; Redis is started too because it is on the classpath. Using the network
+      # here instead of a service container keeps the job readable.
+      - name: Start Postgres and Redis
+        run: |
+          docker network create financial-smoke
+          docker run -d --name smoke-db --network financial-smoke \
+            -e POSTGRES_DB=financial -e POSTGRES_USER=financial -e POSTGRES_PASSWORD=financial \
+            postgres:16
+          docker run -d --name smoke-redis --network financial-smoke redis:7
+          for i in $(seq 1 30); do
+            docker exec smoke-db pg_isready -U financial -d financial && break
+            sleep 2
+          done
+
+      - name: Smoke-check the image
+        run: |
+          docker run -d --name smoke-app --network financial-smoke -p 8080:8080 \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://smoke-db:5432/financial \
+            -e SPRING_DATASOURCE_USERNAME=financial \
+            -e SPRING_DATASOURCE_PASSWORD=financial \
+            -e SPRING_DATA_REDIS_HOST=smoke-redis \
+            financial-transactions:ci
+          for i in $(seq 1 30); do
+            if docker exec smoke-app curl -fsS http://localhost:8080/actuator/health; then
+              echo
+              echo "Image is healthy."
+              docker rm -f smoke-app smoke-db smoke-redis
+              docker network rm financial-smoke
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "The application did not become healthy; container logs follow."
+          docker logs smoke-app
+          docker rm -f smoke-app smoke-db smoke-redis || true
+          docker network rm financial-smoke || true
+          exit 1
+
+      - name: Clean up on failure
+        if: failure()
+        run: |
+          docker rm -f smoke-app smoke-db smoke-redis || true
+          docker network rm financial-smoke || true

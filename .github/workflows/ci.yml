@@ -1,0 +1,24 @@
+name: CI
+
+# Fast path: runs on every push and every pull request. Kept deliberately small so it
+# stays in the low minutes range; expensive checks live in quality.yml.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    uses: ./.github/actions/ci
