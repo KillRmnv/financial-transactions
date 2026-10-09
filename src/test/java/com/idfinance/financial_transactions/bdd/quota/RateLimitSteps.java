@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.bdd.quota;
 
+import com.idfinance.financial_transactions.bdd.support.StoredWorldCleaner;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
@@ -47,6 +48,9 @@ class RateLimitSteps {
 	@Autowired
 	private CurrencyRateRepository currencyRateRepository;
 
+	@Autowired
+	private StoredWorldCleaner storedWorldCleaner;
+
 	private String baseUrl;
 
 	private ResponseEntity<String> response;
@@ -55,9 +59,7 @@ class RateLimitSteps {
 
 	@Before
 	void cleanUp() {
-		this.expenseTransactionRepository.deleteAll();
-		this.expenseLimitRepository.deleteAll();
-		this.currencyRateRepository.deleteAll();
+		this.storedWorldCleaner.clean();
 		this.baseUrl = "http://localhost:" + this.environment.getProperty("local.server.port");
 		this.response = null;
 		this.responses.clear();

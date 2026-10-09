@@ -17,8 +17,9 @@ import org.springframework.context.annotation.Import;
  * <p>
  * The external rates provider is a WireMock server rather than an in-process
  * bean, also because requirement 6 says so, and because it is the only way the
- * adapter's own request is exercised at all: the real {@code HttpRatesClient}
- * is registered, pointed at the stub through {@code app.rates.base-url}.
+ * adapter's own request is exercised at all: the real
+ * {@code TwelveDataRatesProvider} is registered, pointed at the stub through
+ * {@code app.rates.base-url}.
  */
 
 @CucumberContextConfiguration

@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.service;
 
+import com.idfinance.financial_transactions.cache.RateCache;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
@@ -38,6 +39,8 @@ public class ExchangeRateService {
 	 */
 	private static final String SOURCE_IDENTITY = "identity";
 
+	private static final String SOURCE_CACHE = "cache";
+
 	private static final String SOURCE_DATABASE = "database";
 
 	private static final String SOURCE_EXTERNAL = "external";
@@ -49,6 +52,8 @@ public class ExchangeRateService {
 	private final LedgerPolicy ledgerPolicy;
 
 	private final MetricsRecorder metricsRecorder;
+
+	private final RateCache rateCache;
 
 	/**
 	 * Converts an amount into the ledger currency for the day the transaction
@@ -65,8 +70,12 @@ public class ExchangeRateService {
 			return new Conversion(this.ledgerPolicy.round(amount), BigDecimal.ONE, rateDate);
 		}
 
-		Optional<ExchangeRate> stored = findStored(currency, rateDate);
-		String source = SOURCE_DATABASE;
+		Optional<ExchangeRate> stored = findCached(currency, rateDate);
+		String source = SOURCE_CACHE;
+		if (stored.isEmpty()) {
+			stored = findStored(currency, rateDate);
+			source = SOURCE_DATABASE;
+		}
 		if (stored.isEmpty()) {
 			stored = fetchAndStore(currency, rateDate);
 			source = SOURCE_EXTERNAL;
@@ -80,14 +89,13 @@ public class ExchangeRateService {
 		this.metricsRecorder.rateResolved(source, this.ratesProvider.name());
 		log.debug("Converting {} {} at {} (rate {} from {})", amount, currency.getCode(), effective, rate.rateDate(),
 				this.ratesProvider.name());
-		// Multiply first, round once: rounding the rate would destroy the only
-		// precision the conversion has.
 		return new Conversion(this.ledgerPolicy.round(amount.multiply(effective)), effective, rate.rateDate());
 	}
 
 	/**
 	 * Order of lookup, cheapest first:
 	 * <ol>
+	 * <li>Redis, which holds what a previous lookup already resolved;</li>
 	 * <li>the rate of the exact day, using {@code previous_close} when the day has
 	 * no close;</li>
 	 * <li>the most recent rate not later than that day, which covers a day whose
@@ -95,13 +103,32 @@ public class ExchangeRateService {
 	 * arriving on Tuesday would be stuck;</li>
 	 * <li>a single external call for the pair.</li>
 	 * </ol>
+	 *
+	 * <p>
+	 * The cache sits in front of the database rather than replacing it. It is
+	 * skipped silently when it is disabled or unreachable, so a Redis outage costs
+	 * the round trip it was meant to save and nothing else.
 	 */
+	private Optional<ExchangeRate> findCached(Currency currency, LocalDate rateDate) {
+		String ledger = this.ledgerPolicy.currencyCode();
+		Optional<ExchangeRate> cached = this.rateCache.get(currency.getCode(), ledger, rateDate);
+		cached.ifPresent(rate -> log.debug("The cache holds the {} rate for {}", currency.getCode(), rateDate));
+		return cached;
+	}
+
 	private Optional<ExchangeRate> findStored(Currency currency, LocalDate rateDate) {
-		return Stream
+		Optional<ExchangeRate> found = Stream
 				.of(this.currencyRateRepository.findForDay(currency, rateDate),
 						this.currencyRateRepository.findLatestOnOrBefore(currency, rateDate))
 				.flatMap(Optional::stream).map(rate -> ExchangeRate.from(rate, this.ledgerPolicy.currencyCode()))
 				.filter(ExchangeRate::effectiveRateIsPositive).findFirst();
+		// Only a rate that was actually resolved is worth remembering: caching the
+		// absence of one
+		// would keep sending transactions to the paid provider after the sweep has
+		// published it.
+		found.ifPresent(
+				rate -> this.rateCache.put(currency.getCode(), this.ledgerPolicy.currencyCode(), rateDate, rate));
+		return found;
 	}
 
 	private Optional<ExchangeRate> fetchAndStore(Currency currency, LocalDate rateDate) {
@@ -130,17 +157,24 @@ public class ExchangeRateService {
 	@Transactional
 	public CurrencyRate store(Currency currency, ExchangeRate rate) {
 		String provider = this.ratesProvider.name();
-		return this.currencyRateRepository.findForDay(currency, rate.rateDate()).map(existing -> {
+		CurrencyRate stored = this.currencyRateRepository.findForDay(currency, rate.rateDate()).map(existing -> {
 			existing.refresh(rate.close(), rate.previousClose());
 			log.debug("Refreshed the {} rate for {}: {}", currency.getCode(), rate.rateDate(), rate.effectiveRate());
 			return existing;
 		}).orElseGet(() -> {
-			CurrencyRate stored = this.currencyRateRepository
+			CurrencyRate row = this.currencyRateRepository
 					.save(new CurrencyRate(currency, rate.rateDate(), rate.close(), rate.previousClose(), provider));
 			log.info("Stored a new {} rate for {}: {} (from {})", currency.getCode(), rate.rateDate(),
 					rate.effectiveRate(), provider);
-			return stored;
+			return row;
 		});
+		// Whatever was cached for this pair described the row that has just changed.
+		// The generation
+		// bump retires all of it at once, including entries cached under later days
+		// that this rate
+		// answered through findLatestOnOrBefore.
+		this.rateCache.invalidatePair(currency.getCode(), this.ledgerPolicy.currencyCode());
+		return stored;
 	}
 
 	/**

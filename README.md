@@ -84,13 +84,15 @@ asking for `KZT/EUR` on its own.
 The specification asks for rates to be stored locally and for ingestion never to lose data.
 The lookup order in `ExchangeRateService` is:
 
-1. **Local database, exact day.** `close` is used; when the day has no close of its own
+1. **Redis**, holding what a previous lookup already resolved. Optional in every direction: a miss,
+   an unreadable value or an unreachable Redis all fall through to the step below.
+2. **Local database, exact day.** `close` is used; when the day has no close of its own
    (weekend, holiday) `previous_close` is used instead, which is what the specification asks
    for.
-2. **Local database, most recent rate not later than that day.** This step is not in the
+3. **Local database, most recent rate not later than that day.** This step is not in the
    specification but is needed in practice: a Monday close may not be published yet when the
    transaction arrives on Tuesday, and without this such a transaction would be stuck.
-3. **One external call** for the pair, with the configured timeouts and retry count. The retry
+4. **One external call** for the pair, with the configured timeouts and retry count. The retry
    is resilience4j's `Retry` core API configured from `app.rates.attempts` and
    `app.rates.retry-backoff`, not its `@Retry` aspect: the aspect needs the Spring starter and AOP,
    and the policy is built once in the constructor anyway.
@@ -106,6 +108,36 @@ named after the failure rather than after rates specifically, so the next integr
 The daily refresh covers only the configured pairs. Other currencies are fetched on demand,
 because each external call costs money and sweeping currencies nobody transacts in would waste
 that budget.
+
+
+### The Redis rate cache
+
+Optional requirement 2\* — the rates are cached in Redis in front of `currency_rate`. Worth being
+precise about what it is: the table is indexed, answers the same question, and never fails, so the
+cache saves one round trip per transaction and nothing more. It is not a source of truth and is
+never allowed to become one.
+
+**Every failure falls through.** Redis unreachable, a value that will not decode, the cache
+disabled entirely — each one costs a database query and produces the same converted amount. The
+transaction is stored either way. `RateCacheDisabledTests` runs a context with
+`app.cache.enabled=false` and asserts the conversion still happens, because "turn it off" has to be
+a supported deployment rather than a line in a property file.
+
+**A miss is never cached.** Caching "there is no rate for this day" would keep sending transactions
+down the paid external path after the daily sweep published one — the exact failure the cache exists
+to prevent.
+
+**Invalidation uses a generation counter, not key deletion.** A cached answer is keyed by the day
+that was *asked for*, while the rate that answered it may be older: step 3 above deliberately answers
+a question about the 5th with the rate of the 1st. Storing a new rate therefore has to retire the
+entry cached under the 5th, and under every later day too. Each pair has a counter in its key, and a
+write increments it, so one `INCR` retires all of it with no `SCAN` and no set of keys to track. The
+cost is one extra `GET` per lookup. `app.cache.ttl` is the backstop for a lost invalidation, not the
+mechanism.
+
+`app.cache.key-prefix` namespaces the keys, since a shared Redis should not receive this service's
+keys at its root. `financial.rates.resolved` counts a `source="cache"` resolution, which is the
+number that says whether the cache is earning its place.
 
 ## Running it
 
@@ -410,8 +442,10 @@ Two places where the estimate would have been wrong, which is the useful part:
   Had the tests been written from the table rather than from the flag column, they would have
   asserted a wrong number and passed.
 
-The parts of the specification marked optional were deliberately left out and listed under known
-gaps rather than built quietly: the Redis rate cache and the MCP server over this API.
+Of the specification's optional points, the rate cache (2\*), the Docker packaging (3\*) and the CI
+pipeline (4\*) are done. The virtual-thread parallelism for a client's currencies (1\*) is done for the
+daily sweep; the per-transaction side is not, and the honest reason is in `Known gaps` below along
+with the MCP server (7\*).
 
 ## Accounts
 
@@ -420,11 +454,13 @@ table**. The specification says one thing about accounts — "строка из 
 a field format, not an entity. Normalising accounts would need facts about them that nobody has
 specified: who owns the account, its currency, whether it is closed. Adding a table for a string
 that is already unique by definition would be structure without a question behind it.
+## Known gaps
+
 - `application.yml` has no datasource section by design; see the run instructions.
 - The API suite stubs the external provider with WireMock; the service suite stubs it in-process.
   The adapter's own retry and timeout policy is configured but not exercised against a slow or
   flaky server, only against a 503 that never succeeds.
-- Rates are not cached in Redis. The specification lists that as optional, and it would be
-  worth it only if the database lookup showed up as a bottleneck.
+- The cache is not warmed: the first transaction of a pair after a cold start pays the full lookup,
+  and only later ones hit Redis. A read-through cache cannot avoid that without knowing the future.
 - `exchange_rate` has no index on `(base_currency, rate_date)` beyond its unique constraint; the
   lookup is already served by it, but a wider index may earn its place under real volume.

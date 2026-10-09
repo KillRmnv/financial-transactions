@@ -1,6 +1,7 @@
 package com.idfinance.financial_transactions.bdd.api;
 
 import com.idfinance.financial_transactions.SettableClock;
+import com.idfinance.financial_transactions.bdd.support.StoredWorldCleaner;
 import com.idfinance.financial_transactions.bdd.support.WireMockRatesConfiguration.HttpRatesStub;
 import com.idfinance.financial_transactions.entity.ExpenseTransaction;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
@@ -69,6 +70,8 @@ class ApiSteps {
 	@Autowired
 	private HttpRatesStub ratesStub;
 	@Autowired
+	private StoredWorldCleaner storedWorldCleaner;
+	@Autowired
 	private Environment environment;
 	private String accountFrom;
 	private String category;
@@ -81,9 +84,7 @@ class ApiSteps {
 
 	@Before
 	void cleanUp() {
-		this.expenseTransactionRepository.deleteAll();
-		this.expenseLimitRepository.deleteAll();
-		this.currencyRateRepository.deleteAll();
+		this.storedWorldCleaner.clean();
 		// The stubs are rebuilt too: a scenario that published a rate must not leave it
 		// behind for
 		// the next one, which is the same leak the database rows would be.

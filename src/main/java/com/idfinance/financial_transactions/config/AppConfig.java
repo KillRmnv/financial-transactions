@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
-@EnableConfigurationProperties({AppProperties.class, LedgerPolicy.class})
+@EnableConfigurationProperties({AppProperties.class, LedgerPolicy.class, RateCachePolicy.class})
 public final class AppConfig {
 
 	/**

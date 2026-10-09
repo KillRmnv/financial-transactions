@@ -1,8 +1,11 @@
 package com.idfinance.financial_transactions.bdd.service;
 
 import com.idfinance.financial_transactions.SettableClock;
+import com.idfinance.financial_transactions.bdd.support.StoredWorldCleaner;
 import com.idfinance.financial_transactions.bdd.support.StubRatesProvider;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
+import com.idfinance.financial_transactions.config.RateCachePolicy;
+import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.dto.LimitRequest;
 import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.entity.Currency;
@@ -13,6 +16,7 @@ import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
+import com.idfinance.financial_transactions.service.ExchangeRateService;
 import com.idfinance.financial_transactions.service.LimitService;
 import com.idfinance.financial_transactions.service.TransactionService;
 import io.cucumber.datatable.DataTable;
@@ -20,6 +24,8 @@ import io.cucumber.java.Before;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.Instant;
@@ -27,6 +33,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -38,6 +45,7 @@ import org.assertj.core.api.Assertions;
 import org.assertj.core.api.SoftAssertions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -63,6 +71,9 @@ class ServiceLevelSteps {
 	private TransactionService transactionService;
 
 	@Autowired
+	private ExchangeRateService exchangeRateService;
+
+	@Autowired
 	private ExpenseTransactionRepository expenseTransactionRepository;
 
 	@Autowired
@@ -83,6 +94,15 @@ class ServiceLevelSteps {
 	@Autowired
 	private LedgerPolicy ledgerPolicy;
 
+	@Autowired
+	private StoredWorldCleaner storedWorldCleaner;
+
+	@Autowired
+	private StringRedisTemplate redisTemplate;
+
+	@Autowired
+	private MeterRegistry meterRegistry;
+
 	private String accountFrom;
 
 	private String category;
@@ -91,9 +111,7 @@ class ServiceLevelSteps {
 
 	@Before
 	void cleanUp() {
-		this.expenseTransactionRepository.deleteAll();
-		this.expenseLimitRepository.deleteAll();
-		this.currencyRateRepository.deleteAll();
+		this.storedWorldCleaner.clean();
 		this.stubRatesProvider.setMode(StubRatesProvider.Mode.UNKNOWN);
 		// Captured before any scenario inserts anything: several assertions below
 		// compare the size of the
@@ -156,6 +174,56 @@ class ServiceLevelSteps {
 				day, new BigDecimal(rate), "seeded by a scenario");
 		Assertions.assertThat(this.currencyRateRepository.findForDay(currencyOf(currency), LocalDate.parse(isoDate)))
 				.as("the seeded rate of %s on %s", currency, isoDate).isPresent();
+	}
+
+	/**
+	 * Refreshes the stored rate the way the daily sweep does, so the cache has
+	 * something to be stale about.
+	 *
+	 * <p>
+	 * It goes through {@link ExchangeRateService#store}, not through SQL, and that
+	 * is the whole point of the scenarios using it: the cache is invalidated where
+	 * a rate is written, so a scenario that updated the row behind the service's
+	 * back would be testing a cache that can never notice a refresh — which is a
+	 * real way to write this and a bug worth catching rather than accommodating.
+	 */
+	@Given("the rate for {string} on {string} is refreshed to {word}")
+	void theRateForCurrencyIsRefreshedTo(String currency, String isoDate, String rate) {
+		LocalDate day = LocalDate.parse(isoDate);
+		ExchangeRate refreshed = new ExchangeRate(currency, this.ledgerPolicy.currencyCode(), day, new BigDecimal(rate),
+				null);
+		this.exchangeRateService.store(currencyOf(currency), refreshed);
+		Assertions.assertThat(this.currencyRateRepository.findForDay(currencyOf(currency), day))
+				.as("the refreshed rate of %s on %s", currency, isoDate).isPresent();
+	}
+
+	/**
+	 * Writes junk over the cached payload rather than deleting the key. The
+	 * difference matters: a deleted key is a miss the service handles, while an
+	 * unreadable one is the case where a stale or corrupt value could survive into
+	 * a conversion.
+	 */
+	@Given("the cached {string} rate is replaced with something that is not a rate")
+	void theCachedRateIsUnreadable(String currency) {
+		RateCachePolicy policy = this.storedWorldCleaner.rateCachePolicy();
+		Set<String> keys = this.redisTemplate.keys(policy.keyPrefix() + currency + "/*");
+		Assertions.assertThat(keys).as("a cached rate for %s to corrupt", currency).isNotEmpty();
+		keys.forEach(
+				(key) -> this.redisTemplate.opsForValue().set(key, "this is not the JSON of a rate", policy.ttl()));
+	}
+
+	/**
+	 * Reads the counter the service already keeps rather than asking the cache
+	 * whether it holds anything: the metric is the operator-visible answer, and a
+	 * test that reads the same thing the code writes cannot drift from it. Without
+	 * this step every scenario above passes with a cache that never answers, which
+	 * is the failure a cache is most likely to have.
+	 */
+	@Then("the rate was resolved from the cache at least once")
+	void theRateWasResolvedFromTheCache() {
+		Counter counter = this.meterRegistry.find("financial.rates.resolved").tag("source", "cache").counter();
+		Assertions.assertThat((counter != null) ? counter.count() : 0.0d).as("rates resolved from the cache")
+				.isGreaterThanOrEqualTo(1.0d);
 	}
 
 	@Given("the rates provider fails")
