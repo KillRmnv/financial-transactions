@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {
+        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+      }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@crystaldba/postgres-mcp", "postgresql://readonly:readonly@localhost:5432/financial"],
+      "env": {
+        "PGOPTIONS": "-c statement_timeout=5000 -c default_transaction_read_only=on"
+      }
+    }
+  }
+}
