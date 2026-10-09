@@ -1,0 +1,11 @@
+# Keep the build context small and never leak local state into the image.
+target/
+.git/
+.github/
+.idea/
+*.iml
+.env
+.env.*
+HELP.md
+README.md
+**/*.md
