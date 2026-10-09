@@ -4,15 +4,24 @@ import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.CurrencyPair;
+import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyPairRepository;
+import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Refreshes the rates of the currencies marked active in {@code currency_pair}.
@@ -27,15 +36,34 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>
  * The quote is not read from anywhere and never compared with anything:
  * {@link LedgerPolicy} supplies it and the table does not store a second copy.
- * Storing one would have created a second source of truth that only a
- * code-level check could reconcile.
+ *
+ * <p>
+ * The external calls run concurrently on virtual threads, which is the point of
+ * the specification's optional requirement: they are network-bound and slow, so
+ * serialising them made the sweep take as long as the sum of every provider
+ * round trip. Virtual threads rather than a fixed pool because the number of
+ * currencies is a data decision the operator controls, and a pool would have to
+ * guess it.
+ *
+ * <p>
+ * Only the calls are parallel. Reading the tracked set and writing the results
+ * are each a single transaction taken through {@link TransactionTemplate},
+ * deliberately not with {@code @Transactional}: a self-invoked method is not
+ * proxied, so the annotation would silently not apply, and holding one
+ * transaction open across the whole sweep would keep a database connection
+ * checked out for the duration of every network call. Storing in one batch
+ * after the parallel phase also means a failure halfway cannot leave the table
+ * half refreshed.
  */
 @Component
+@ConditionalOnProperty(name = "app.scheduling.enabled", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
-public class ScheduledRatesFetcher {
+public final class ScheduledRatesFetcher {
 
 	private final CurrencyPairRepository currencyPairRepository;
+
+	private final CurrencyRepository currencyRepository;
 
 	private final RatesProvider ratesProvider;
 
@@ -45,34 +73,92 @@ public class ScheduledRatesFetcher {
 
 	private final Clock clock;
 
-	@Scheduled(cron = "0 0 ${app.scheduled-fetch-hour} * * *", zone = "${app.month-timezone}")
-	@Transactional
-	public void refreshDaily() {
-		List<CurrencyPair> tracked = this.currencyPairRepository.findByActiveTrueOrderByBaseCurrencyCodeAsc();
-		LocalDate today = LocalDate.now(this.clock);
-		log.info("Refreshing {} tracked currencies against {} for {} from {}", tracked.size(),
-				this.ledgerPolicy.currencyCode(), today, this.ratesProvider.name());
+	private final TransactionTemplate transactionTemplate;
 
-		for (CurrencyPair pair : tracked) {
-			fetchAndStore(pair.getBaseCurrency(), today);
+	private final MetricsRecorder metricsRecorder;
+
+	@Scheduled(cron = "0 0 ${app.scheduled-fetch-hour} * * *", zone = "${app.month-timezone}")
+	public void refreshDaily() {
+		LocalDate today = LocalDate.now(this.clock);
+		Instant startedAt = Instant.now(this.clock);
+
+		List<Currency> bases = trackedCurrencies();
+		if (bases.isEmpty()) {
+			log.info("No active currencies to refresh for {}", today);
+			return;
+		}
+
+		String quote = this.ledgerPolicy.currencyCode();
+		log.info("Refreshing {} currencies against {} for {} from {}", bases.size(), quote, today,
+				this.ratesProvider.name());
+
+		Map<String, ExchangeRate> fetched = fetchConcurrently(bases, quote, today);
+		storeAll(fetched);
+		this.metricsRecorder.sweepCompleted(Duration.between(startedAt, Instant.now(this.clock)), fetched.size());
+	}
+
+	private List<Currency> trackedCurrencies() {
+		return this.transactionTemplate.execute(status -> this.currencyPairRepository
+				.findByActiveTrueOrderByBaseCurrencyCodeAsc().stream().map(CurrencyPair::getBaseCurrency).toList());
+	}
+
+	/**
+	 * Fetches every currency at once and collects what came back.
+	 *
+	 * <p>
+	 * One failing currency must not cost the others their rates, so each failure is
+	 * logged inside its own task and dropped from the result rather than
+	 * propagated: a provider that is down for KZT is no reason to leave RUB's rate
+	 * unrefreshed for another day.
+	 */
+	private Map<String, ExchangeRate> fetchConcurrently(List<Currency> bases, String quote, LocalDate date) {
+		Map<String, ExchangeRate> fetched = new LinkedHashMap<>();
+		try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+			var tasks = bases.stream()
+					.map(base -> CompletableFuture.supplyAsync(() -> fetch(base, quote, date), executor)).toList();
+			for (var task : tasks) {
+				// get() after submitting everything keeps the whole batch in flight; joining
+				// inside the
+				// loop above would serialise exactly what this method exists to parallelise.
+				var result = task.join();
+				if (result != null) {
+					fetched.put(result.currencyCode(), result.rate());
+				}
+			}
+		}
+		return fetched;
+	}
+
+	private Fetched fetch(Currency base, String quote, LocalDate date) {
+		String code = base.getCode();
+		try {
+			ExchangeRate rate = this.ratesProvider.rateFor(code, quote, date);
+			if (rate == null) {
+				log.info("No {} published for {} on {}", quote, code, date);
+				return null;
+			}
+			return new Fetched(code, rate);
+		} catch (RuntimeException ex) {
+			log.warn("Could not refresh {}/{} on {}: {}", code, quote, date, ex.getMessage());
+			return null;
 		}
 	}
 
-	private void fetchAndStore(Currency base, LocalDate date) {
-		String quote = this.ledgerPolicy.currencyCode();
-		try {
-			ExchangeRate rate = this.ratesProvider.rateFor(base.getCode(), quote, date);
-			if (rate == null) {
-				log.info("No {} published for {} on {}", quote, base.getCode(), date);
-				return;
-			}
-			this.exchangeRateService.store(base, rate);
-		} catch (RuntimeException ex) {
-			// One unavailable currency must not abort the whole refresh, and a failed
-			// refresh must never
-			// lose stored rates.
-			log.warn("Could not refresh {}/{} on {}: {}", base.getCode(), quote, date, ex.getMessage());
-		}
+	/**
+	 * The currencies are resolved again inside the writing transaction rather than
+	 * carried over from the reading one: those entities are detached by now, and a
+	 * rate row must not end up pointing at a detached instance. It is one primary
+	 * key lookup per currency, once a day.
+	 */
+	private void storeAll(Map<String, ExchangeRate> fetched) {
+		this.transactionTemplate.executeWithoutResult(status -> fetched.forEach((code, rate) -> {
+			Currency currency = this.currencyRepository.findByCode(code).orElseThrow(
+					() -> new IllegalStateException("Tracked currency " + code + " vanished from the lookup"));
+			this.exchangeRateService.store(currency, rate);
+		}));
+	}
+
+	private record Fetched(String currencyCode, ExchangeRate rate) {
 	}
 
 }

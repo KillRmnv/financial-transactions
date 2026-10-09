@@ -1,0 +1,105 @@
+spring:
+  application:
+    name: financial-transactions
+  jpa:
+    # Without this the EntityManager stays open for the whole request and a lazy relation fetched in a
+    # view sneaks a query into rendering.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # prometheus is the scrape target; heapdump is deliberately absent, see the note on it below.
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        # Liveness and readiness as separate endpoints, which is what an orchestrator asks for. The
+        # readiness probe includes the database, so a pod is not sent traffic before Flyway has run.
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  info:
+    env:
+      enabled: true
+
+springdoc:
+  # The title, version and description come from the @Bean in OpenApiConfiguration, because springdoc 3
+  # ignores springdoc.api-docs.info.*. Only the UI settings below are properties.
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+    display-request-duration: true
+
+app:
+  # Планировщики выключаются одной настройкой. В тестовых контекстах это обязательно: иначе дневной свип и
+  # еженедельный обход справочника регистрируются в каждом @SpringBootTest, и тест, случайно дожившийся до
+  # нужного часа, начнёт ходить во внешний API.
+  scheduling:
+    enabled: true
+
+  # The one timezone month boundaries are computed in. Transactions arrive with assorted offsets, so
+  # "the first transaction of March" has to mean the same thing regardless of the sender.
+  month-timezone: UTC
+
+  # Applied when a client never installed a limit, per the specification, denominated in the ledger
+  # currency below.
+  default-limit-sum: 1000.00
+
+  ledger:
+    # Валюта учёта: лимиты номинированы в ней, каждая транзакция переводится в неё перед сравнением с
+    # месячным итогом, и все курсы хранятся именно к ней. Спецификация фиксирует USD, но код этого нигде
+    # не предполагает — перевод учёта на другую валюту это изменение свойства плюс миграция данных.
+    currency-code: USD
+    # Знаков после запятой у денежной суммы. Из спецификации: «десятичное число, 2 знака после точки».
+    amount-scale: 2
+
+  # Hour of the daily refresh, in app.month-timezone.
+  scheduled-fetch-hour: 7
+
+  rates:
+    # Identified in every stored rate, so a staging instance talking to a sandbox and production
+    # talking to a paid tier stay distinguishable in the data.
+    source: ${RATES_SOURCE:twelvedata}
+    # Empty means no external provider is configured and rates are read from the database only.
+    base-url: ${RATES_API_BASE_URL:}
+    # From the environment, never committed.
+    api-key: ${RATES_API_KEY:}
+    connect-timeout: 3s
+    read-timeout: 5s
+    attempts: 3
+    retry-backoff: 500ms
+
+  # Валюты, курсы по которым дневной планировщик опрашивает заранее, живут в таблице currency_pair,
+  # а не здесь: оператор должен уметь добавить или убрать валюту без релиза, а каждый запрос к внешнему
+  # API платный. В таблице хранится только базовая валюта — цитата подставляется из app.ledger выше, и
+  # поэтому перевод учёта на другую валюту эту таблицу не затрагивает.
+  #
+  # Валюта вне этого списка не запрещена: её курс будет взят по требованию при первой же транзакции.
+  # Список решает только, что уже прогрето.
+
+  # Request quotas. The annotation on a handler names one of these blocks; the numbers declared on the
+  # annotation are only a fallback, so a new limited endpoint is never silently unlimited.
+  rate-limits:
+    # Квота в терминах самого лимитера: сколько запросов разрешено за период. Блок ingestion — горячий
+    # путь, он же пишет строки.
+    ingestion:
+      limit-for-period: 60
+      limit-refresh-period: 1s
+      retry-after-seconds: 1
+    # Установка лимита тоже пишет строку, но клиент не делает это в цикле.
+    limit-install:
+      limit-for-period: 30
+      limit-refresh-period: 1s
+      retry-after-seconds: 2
+
+logging:
+  level:
+    com.idfinance.financial_transactions: INFO
