@@ -431,6 +431,57 @@ one flagged transaction instead of two. `ArchitectureTest` is the same idea for 
 each rule is fed a broken fixture so a rule that stops matching anything fails instead of
 silently passing.
 
+### Concurrency and isolation
+
+The flag is decided from a running total, so the whole design rests on one question: **can two
+transactions read the same total?** They can, unless something stops them. Everything below exists to
+answer that.
+
+**The database is at `READ COMMITTED`**, PostgreSQL's default and nothing here overrides it —
+`TransactionIsolationTests` asserts it, so a change to the compose database fails a test instead of
+quietly changing what the flag means. At this level a transaction **does not see another one's
+uncommitted rows**, and that is exactly the hazard: two concurrent posts would each sum a month
+excluding the other's pending row, both conclude the limit is not exceeded, and both would be right
+about the database and wrong about the month. The lost update is invisible afterwards — both rows exist
+and the total is too low.
+
+`TransactionService.applyFlag` therefore takes a `PESSIMISTIC_WRITE` lock on the limit row before
+reading the total. The second post blocks until the first commits, and only then reads a total that
+already includes it. `SERIALIZABLE` would make the lock unnecessary, and is not worth it here: it would
+turn every contention into a serialization failure that has to be retried, whereas the lock serialises
+exactly the rows that must be serialised and nothing else.
+
+**What is checked, and how honestly.**
+
+| Where | What | How well it catches a removed lock |
+|---|---|---|
+| `TransactionIsolationTests` | `READ COMMITTED` holds; an uncommitted row and update are invisible | not applicable — it tests the database, not the lock |
+| `features/service/concurrency.feature` | 10/11/50 threads for one account; 20 racing to create the fallback; two accounts at once; 10 with no rate | **2 runs out of 4** |
+| `features/api/client_api.feature` | 20 concurrent `POST` over HTTP, through the whole chain | **3 runs out of 3** |
+
+The service-level assertions are probabilistic and the feature says so. Two reads overlap only when
+their windows collide, which is a matter of scheduling: removing the lock did not fail every run. The
+HTTP scenario caught it every time, because a request round trip widens the window considerably — which
+is why it is kept alongside rather than instead of the service-level one. A correct implementation is
+deterministic (the flagged count is exact every time), and that asymmetry is the signal.
+
+**Two accounts do not serialise against each other.** The lock is on `(account_from, category_id)`, so
+concurrent posts for different clients are independent runs. This is asserted by count and total, not by
+elapsed time: a timing assertion would catch a lock that had become global, and would also fail on a
+loaded CI machine for reasons that have nothing to do with the code.
+
+**`lock_timeout` bounds the wait.** PostgreSQL's default of `0` means waiting forever, and forever is
+the wrong answer for a synchronous API — the request holds a Tomcat thread, a pool connection and a
+client socket while nothing is going to release the row. `prod` sets `SET lock_timeout = '3s'` through
+Hikari's `connection-init-sql`; on expiry the service raises `LockUnavailableException` and the client
+gets **503** with type `.../lock-unavailable`, not a 500. The distinction decides whether a client
+retries. Measured against a held lock: 3.1 s, 503.
+
+It applies to every lock wait in the session, not only ours — including the insert of a fallback limit
+and any DDL lock Flyway may hit. That is the same bargain: a bounded wait that fails visibly rather
+than an unbounded one that disappears. Tests leave it at `0` so that a concurrency scenario fails on a
+wrong flag rather than on a timeout, which would make flakiness depend on how loaded the machine is.
+
 ### Boundary values and equivalence classes
 
 Four features are organised as partition tables, because the two techniques catch different

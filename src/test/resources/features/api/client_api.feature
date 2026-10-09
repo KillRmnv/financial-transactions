@@ -90,3 +90,15 @@ Feature: The client-facing API over HTTP
     When a transaction in "KZT" for "400" USD happened on "2022-01-05"
     Then the response is 201
     And the only transaction is stored without a flag
+
+  # The same check as features/service/concurrency.feature, over HTTP, and deliberately kept as well:
+  # the HTTP round trip widens the window in which two posts can read the same total, so this scenario
+  # caught the removed row lock in three runs out of three where the service-level one caught it in two
+  # out of four. Where a check can be made reliable, it should be.
+  Scenario: Concurrent posts over HTTP all land, and the month's total adds up
+    Given the account "0000000470" and the category "product"
+    And a limit of "1000" USD was installed on "2022-01-01"
+    When 20 requests post a transaction of "100" USD on "2022-01-15" at the same time
+    Then 20 transactions are stored
+    And the month's total is "2000" USD
+    And exactly 10 transactions are flagged

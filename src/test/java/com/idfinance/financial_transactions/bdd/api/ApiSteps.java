@@ -19,6 +19,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 import org.assertj.core.api.AbstractBooleanAssert;
 import org.assertj.core.api.AbstractCharSequenceAssert;
 import org.assertj.core.api.AbstractIntegerAssert;
@@ -224,6 +231,90 @@ class ApiSteps {
 		softly.assertAll();
 	}
 
+	/**
+	 * Posts concurrently over HTTP, which is the only place the whole chain is
+	 * exercised: web layer, validation, the service, the lock and the database, all
+	 * at once, against a real port.
+	 *
+	 * <p>
+	 * Every request gets its own {@code RestClient} on purpose. A client shared
+	 * between threads is safe for reads and a poor test for writes: the connection
+	 * pool in front of it would serialise the posts, which is the very thing the
+	 * scenario is trying to overlap.
+	 *
+	 * <p>
+	 * The statuses are returned rather than stored in {@code this.response},
+	 * because a hundred concurrent requests cannot each own one field. A 429 would
+	 * be a legitimate outcome under the ingestion quota — 20 posts is under it — so
+	 * any non-201 is a failure to report rather than a detail to read off.
+	 */
+	@When("{int} requests post a transaction of {string} USD on {string} at the same time")
+	void requestsPostConcurrently(int requests, String sum, String isoDate) throws Exception {
+		LocalDate day = LocalDate.parse(isoDate);
+		BigDecimal amount = new BigDecimal(sum);
+		CyclicBarrier startLine = new CyclicBarrier(requests);
+
+		List<Callable<Integer>> posts = IntStream.range(0, requests).<Callable<Integer>>mapToObj((index) -> () -> {
+			startLine.await(30, TimeUnit.SECONDS);
+			Map<String, Object> body = new LinkedHashMap<>();
+			body.put("accountFrom", this.accountFrom);
+			body.put("accountTo", COUNTERPART);
+			body.put("currencyShortname", "USD");
+			body.put("sum", amount);
+			body.put("expenseCategory", this.category);
+			body.put("datetime", day.atStartOfDay().atOffset(ZoneOffset.UTC).toString());
+			try {
+				ResponseEntity<String> posted = RestClient.builder().baseUrl(this.baseUrl)
+						.defaultHeader("Content-Type", "application/json").build().post()
+						.uri("/api/v1/transactions", new Object[0]).body(body).retrieve().toEntity(String.class);
+				return posted.getStatusCode().value();
+			} catch (RestClientResponseException ex) {
+				return ex.getStatusCode().value();
+			}
+		}).toList();
+
+		List<Integer> statuses = new ArrayList<>();
+		try (ExecutorService pool = Executors.newFixedThreadPool(requests)) {
+			List<Future<Integer>> results = posts.stream().map(pool::submit).toList();
+			for (Future<Integer> result : results) {
+				statuses.add(result.get(90, TimeUnit.SECONDS));
+			}
+		}
+
+		// Set after the fact so a failing status is reported by this step rather than
+		// surfacing as an
+		// unrelated count mismatch three steps later.
+		Assertions.assertThat(statuses).as("the status of every concurrent post; all %d are created", requests)
+				.containsOnly(201);
+	}
+
+	/**
+	 * Read from the database rather than from the response: with twenty concurrent
+	 * posts there are twenty responses and only one answer to this question, and
+	 * the row is what the twenty wrote.
+	 */
+	@Then("the month's total is {string} USD")
+	void theMonthsTotalIs(String expected) {
+		BigDecimal total = this.expenseTransactionRepository.findAll().stream().map(ExpenseTransaction::getSumInLedger)
+				.reduce(BigDecimal.ZERO, BigDecimal::add);
+
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(total).as("the sum of every stored transaction")
+				.isEqualByComparingTo(new BigDecimal(expected));
+		softly.assertThat(this.expenseTransactionRepository.findAll())
+				.as("no transaction stored without a calculated flag")
+				.noneMatch((transaction) -> transaction.getLimitExceeded() == null);
+		softly.assertAll();
+	}
+
+	@Then("exactly {int} transactions are flagged")
+	void exactlyTransactionsAreFlagged(int expected) {
+		long flagged = this.expenseTransactionRepository.findAll().stream()
+				.filter((transaction) -> Boolean.TRUE.equals(transaction.getLimitExceeded())).count();
+
+		Assertions.assertThat(flagged).as("the flagged count after concurrent posts").isEqualTo(expected);
+	}
+
 	@When("the limits of the account are requested")
 	void theLimitsAreRequested() {
 		this.response = exchange(this.client().get().uri("/api/v1/limits?account_from=" + this.accountFrom));
@@ -308,6 +399,79 @@ class ApiSteps {
 		softly.assertThat(stored.getFirst().getLimitExceeded()).as("and no verdict was invented").isNull();
 		softly.assertThat(stored.getFirst().getSumInLedger()).as("the ledger amount stays absent").isNull();
 		softly.assertAll();
+	}
+
+	// --- currency_pair: which currencies the daily sweep pays for ---
+	//
+	// Not part of the two APIs the specification asks for. It is here because the
+	// only other way to change the set is SQL against the database, which is a
+	// different tool with a different set of permissions — and because a failure in
+	// this area means a sweep is being paid for that nobody asked for, which no
+	// transaction scenario would ever notice.
+
+	@When("the tracked currencies are listed")
+	void theTrackedCurrenciesAreListed() {
+		this.response = exchange(this.client().get().uri("/api/v1/currency-pairs"));
+		this.responseBody = readBody();
+	}
+
+	@Then("the tracked currencies are:")
+	void theTrackedCurrenciesAre(DataTable table) {
+		List<String> actual = new ArrayList<>();
+		this.responseBody.forEach(row -> actual.add(row.get("code").asText() + "=" + row.get("active").asBoolean()));
+		List<String> expected = table.asMaps(String.class, String.class).stream()
+				.map(row -> row.get("code") + "=" + Boolean.parseBoolean(row.get("active"))).toList();
+		((ListAssert) ((AbstractListAssert) ((Object) Assertions.assertThat(actual)))
+				.as("the tracked currencies and their state", new Object[0])).containsExactlyElementsOf(expected);
+	}
+
+	// @When only, not both. Cucumber 8 raises DuplicateStepDefinitionException for
+	// a @Given and a @When
+	// sharing one expression — on one method or two — and it fails the whole glue
+	// class rather than the
+	// one scenario. The features use "And" where the step is a precondition, which
+	// is the same step.
+	@When("{string} is set to be tracked")
+	void theCurrencyIsSetToBeTracked(String code) {
+		this.setTracked(code, true);
+	}
+
+	@When("{string} is set to be untracked")
+	void theCurrencyIsSetToBeUntracked(String code) {
+		this.setTracked(code, false);
+	}
+
+	@Then("the tracked currency {string} is active")
+	void theTrackedCurrencyIsActive(String code) {
+		((BooleanAssert) Assertions.assertThat(this.trackedStateOf(code))
+				.as("whether the tracked currency %s is swept daily", code)).isTrue();
+	}
+
+	@Then("the tracked currency {string} is not active")
+	void theTrackedCurrencyIsNotActive(String code) {
+		((BooleanAssert) Assertions.assertThat(this.trackedStateOf(code))
+				.as("whether the tracked currency %s is still swept daily", code)).isFalse();
+	}
+
+	private void setTracked(String code, boolean active) {
+		this.response = this.exchange(this.client().put().uri("/api/v1/currency-pairs/" + code, new Object[0])
+				.body(Map.of("active", active)));
+		this.responseBody = this.readBody();
+	}
+
+	/**
+	 * Read back over HTTP rather than from the repository: the claim is about what
+	 * an operator would see, and a repository read would also pass if the write had
+	 * never been committed and the entity were still sitting in the session.
+	 */
+	private boolean trackedStateOf(String code) {
+		theTrackedCurrenciesAreListed();
+		for (JsonNode row : this.responseBody) {
+			if (code.equals(row.get("code").asText())) {
+				return row.get("active").asBoolean();
+			}
+		}
+		throw new AssertionError("No tracked currency '" + code + "' in " + this.responseBody);
 	}
 
 	@Then(value = "the response is a problem of type {string}")

@@ -31,6 +31,7 @@ import java.sql.Date;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -125,6 +126,24 @@ class ServiceLevelSteps {
 	void theAccountAndCategory(String accountFrom, String category) {
 		this.accountFrom = accountFrom;
 		this.category = category;
+	}
+
+	/**
+	 * Installs a limit for an account other than the current one, so a scenario can
+	 * set up two clients at once. The existing step moves the clock and installs
+	 * for {@code accountFrom}; this one carries the account in the sentence rather
+	 * than in the context, because the point of these scenarios is that the two
+	 * accounts never share a lock.
+	 */
+	@Given("a limit of {string} USD was installed for {string} on {string}")
+	void aLimitWasInstalledFor(String sum, String accountFrom, String isoDate) {
+		this.clock.set(LocalDate.parse(isoDate).atStartOfDay().toInstant(ZoneOffset.UTC));
+		this.limitService.install(new LimitRequest(accountFrom, this.category, new BigDecimal(sum)));
+	}
+
+	@Given("no limit was ever installed for the account")
+	void noLimitWasEverInstalled() {
+		Assertions.assertThat(this.expenseLimitRepository.findAll()).as("limits before the concurrent posts").isEmpty();
 	}
 
 	@Given("the clock reads {string}")
@@ -286,17 +305,6 @@ class ServiceLevelSteps {
 				.isEqualTo(Instant.EPOCH);
 	}
 
-	@Then("the transaction of {string} is stored without a flag")
-	void theTransactionIsStoredWithoutAFlag(String isoDate) {
-		ExpenseTransaction transaction = transactionOf(isoDate);
-
-		SoftAssertions softly = new SoftAssertions();
-		softly.assertThat(transaction.getLimitExceeded()).as("no flag, rather than a false one").isNull();
-		softly.assertThat(transaction.isFlagCalculated()).as("and the row says so explicitly").isFalse();
-		softly.assertThat(transaction.getSumInLedger()).as("the converted amount is unknown").isNull();
-		softly.assertAll();
-	}
-
 	private ExpenseLimit defaultLimit() {
 		List<ExpenseLimit> defaults = this.expenseLimitRepository.findAll().stream()
 				.filter((limit) -> limit.isDefaultLimit()).toList();
@@ -326,14 +334,175 @@ class ServiceLevelSteps {
 		}
 	}
 
+	/**
+	 * Two accounts, {@code threads} posts each, released together.
+	 *
+	 * <p>
+	 * The barrier has one arm per post rather than one per account: the accounts
+	 * are not synchronised with each other, only each account's own posts are,
+	 * which is what makes the two runs independent.
+	 *
+	 * <p>
+	 * Nothing here asserts on elapsed time. A timing assertion would catch a lock
+	 * that had become global, but it would also fail on a loaded CI machine for
+	 * reasons that have nothing to do with the code. What the assertions below
+	 * catch is the same regression without the flake: if the lock were global, both
+	 * accounts would still compute correctly, so this is checked by count and by
+	 * total rather than by duration — the serialisation is proven directly in the
+	 * truth-table scenario, where removing the lock changes the flagged count.
+	 */
+	@When("{int} accounts each post {int} transactions of {string} USD on {string}")
+	void accountsEachPostTransactions(int accounts, int threads, String sum, String isoDate) throws Exception {
+		LocalDate day = LocalDate.parse(isoDate);
+		BigDecimal amount = new BigDecimal(sum);
+		List<String> accountList = this.accountsFor(accounts);
+		CyclicBarrier startLine = new CyclicBarrier(accounts * threads);
+
+		List<Callable<Void>> posts = new ArrayList<>();
+		for (String account : accountList) {
+			for (int index = 0; index < threads; index++) {
+				posts.add(() -> {
+					startLine.await(30, TimeUnit.SECONDS);
+					this.transactionService.accept(new TransactionRequest(account, COUNTERPART, "USD", amount,
+							this.category, day.atStartOfDay().atOffset(ZoneOffset.UTC)));
+					return null;
+				});
+			}
+		}
+
+		try (ExecutorService pool = Executors.newFixedThreadPool(accounts * threads)) {
+			List<Future<Void>> results = posts.stream().map(pool::submit).toList();
+			for (Future<Void> result : results) {
+				result.get(90, TimeUnit.SECONDS);
+			}
+		}
+	}
+
+	/**
+	 * Distinct accounts derived from the one the scenario named, so a two-account
+	 * scenario does not have to repeat them in the sentence. They differ only in
+	 * the last two digits, which keeps them inside the ten digit format the schema
+	 * enforces.
+	 */
+	private List<String> accountsFor(int accounts) {
+		List<String> accountList = new ArrayList<>();
+		for (int offset = 0; offset < accounts; offset++) {
+			accountList.add(this.accountFrom.substring(0, this.accountFrom.length() - 2) + "%02d".formatted(offset));
+		}
+		return accountList;
+	}
+
+	@Then("each account's month totals {string} USD")
+	void eachAccountsMonthTotals(String expected) {
+		BigDecimal perAccount = new BigDecimal(expected);
+		for (String account : accountsWithTransactions()) {
+			BigDecimal total = this.expenseTransactionRepository.findAll().stream()
+					.filter((transaction) -> transaction.getAccountFrom().equals(account))
+					.map(ExpenseTransaction::getSumInLedger).reduce(BigDecimal.ZERO, BigDecimal::add);
+			Assertions.assertThat(total).as("the month total of %s", account).isEqualByComparingTo(perAccount);
+		}
+	}
+
+	@Then("each account has exactly {int} flagged transactions")
+	void eachAccountHasExactlyFlagged(int expected) {
+		for (String account : accountsWithTransactions()) {
+			long flagged = this.expenseTransactionRepository.findAll().stream()
+					.filter((transaction) -> transaction.getAccountFrom().equals(account))
+					.filter((transaction) -> Boolean.TRUE.equals(transaction.getLimitExceeded())).count();
+			Assertions.assertThat(flagged).as("flagged transactions of %s", account).isEqualTo(expected);
+		}
+	}
+
+	private List<String> accountsWithTransactions() {
+		return this.expenseTransactionRepository.findAll().stream().map(ExpenseTransaction::getAccountFrom).distinct()
+				.sorted().toList();
+	}
+
+	/**
+	 * Distinct database identities, which is the same as saying no transaction
+	 * overwrote another.
+	 *
+	 * <p>
+	 * The row count already says the rows exist; this says they are separate rows.
+	 * A lost update under {@code READ COMMITTED} would not show up here, because
+	 * each insert gets its own identity regardless — which is why the flag count,
+	 * not this, is what proves the lock works.
+	 */
+	@Then("every transaction carries a distinct database identity")
+	void everyTransactionCarriesADistinctIdentity() {
+		List<Long> identities = this.expenseTransactionRepository.findAll().stream().map(ExpenseTransaction::getId)
+				.toList();
+
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(identities).as("no null identity; a saved row always has one").doesNotContainNull();
+		softly.assertThat(Set.copyOf(identities)).as("distinct identities").hasSameSizeAs(identities);
+		softly.assertAll();
+	}
+
+	@Then("exactly one automatic fallback limit exists")
+	void exactlyOneAutomaticFallbackLimitExists() {
+		Assertions
+				.assertThat(this.expenseLimitRepository.findAll().stream().filter((limit) -> limit.isDefaultLimit())
+						.toList())
+				.as("the fallback is created by an idempotent insert, so the race must leave one row").hasSize(1);
+	}
+
+	@Then("no automatic fallback limit was created for the account")
+	void noAutomaticFallbackLimitWasCreated() {
+		// A transaction with no rate never reaches applyFlag, so the limit row is never
+		// needed — and creating it anyway would be a write on a path that has nothing
+		// to
+		// measure against.
+		Assertions.assertThat(
+				this.expenseLimitRepository.findAll().stream().filter((limit) -> limit.isDefaultLimit()).toList())
+				.as("no fallback for an account whose transactions were never flagged").isEmpty();
+	}
+
+	@When("{int} threads each post a transaction of {string} {word} against the ledger on {string}")
+	void threadsEachPostATransactionInCurrency(int threads, String sum, String currency, String isoDate)
+			throws Exception {
+		LocalDate day = LocalDate.parse(isoDate);
+		BigDecimal amount = new BigDecimal(sum);
+		CyclicBarrier startLine = new CyclicBarrier(threads);
+
+		List<Callable<Void>> posts = IntStream.range(0, threads).<Callable<Void>>mapToObj((index) -> () -> {
+			startLine.await(30, TimeUnit.SECONDS);
+			this.transactionService.accept(new TransactionRequest(this.accountFrom, COUNTERPART, currency, amount,
+					this.category, day.atStartOfDay().atOffset(ZoneOffset.UTC)));
+			return null;
+		}).toList();
+
+		try (ExecutorService pool = Executors.newFixedThreadPool(threads)) {
+			List<Future<Void>> results = posts.stream().map(pool::submit).toList();
+			for (Future<Void> result : results) {
+				result.get(60, TimeUnit.SECONDS);
+			}
+		}
+	}
+
+	@Then("every transaction is stored without a flag")
+	void everyTransactionIsStoredWithoutAFlag() {
+		Assertions.assertThat(this.expenseTransactionRepository.findAll()).as("rows stored with no calculated flag")
+				.allSatisfy((transaction) -> {
+					Assertions.assertThat(transaction.isFlagCalculated()).as("flag calculated").isFalse();
+					Assertions.assertThat(transaction.getLimitExceeded()).as("and no verdict invented").isNull();
+				});
+	}
+
 	@Then("exactly {int} transactions are flagged")
 	void exactlyTransactionsAreFlagged(int expected) {
 		long flagged = this.expenseTransactionRepository.findAll().stream()
 				.filter((transaction) -> Boolean.TRUE.equals(transaction.getLimitExceeded())).count();
 
-		Assertions.assertThat(flagged)
-				.as("the flagged count; with the row lock removed two threads read the same total and this reads 1")
-				.isEqualTo(expected);
+		// A concurrency assertion, and it is a probabilistic one: removing the row lock
+		// makes two
+		// threads read the same running total, but only when their reads overlap.
+		// Measured over four
+		// runs with the lock removed, this failed in two. The count is exact with the
+		// lock in place,
+		// and that asymmetry is the point — a correct implementation has nothing to be
+		// lucky about.
+		Assertions.assertThat(flagged).as("the flagged count").isEqualTo(expected);
 	}
 
 	@Then("the month's total is {string} USD")

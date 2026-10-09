@@ -65,6 +65,14 @@ Feature: The monthly limit flag against a real database
     Then the automatic default limit is "1000" USD
     And the automatic default limit was installed at the epoch
 
+  Scenario: A backdated transaction is measured against the fallback, not a limit installed after it
+    Given the account "0000000461" and the category "product"
+    And a limit of "2000" USD was installed on "2026-06-01"
+    When a transaction of "500" USD happened on "2022-01-05"
+    Then 1 transactions are stored
+    And the transaction of "2022-01-05" was measured against a limit of "1000" USD
+    And exactly one automatic fallback limit exists
+
   Scenario Outline: Concurrent posts for one client serialise on the limit row
     Given a limit of "1000" USD was installed on "2022-01-01"
     When <threads> threads each post a transaction of "100" USD on "2022-01-15"
