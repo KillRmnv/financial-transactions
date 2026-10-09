@@ -17,8 +17,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>
  * The rounding mode lives here rather than at the call sites because "how is an
  * amount of money rounded" is one decision, not one per conversion. It is
- * {@link RoundingMode#HALF_UP}: the usual commercial choice, and the one that
- * matches what the specification's tables assume.
+ * {@link RoundingMode#HALF_UP}.
  *
  * <p>
  * The currency code is validated on binding. A typo in a property would

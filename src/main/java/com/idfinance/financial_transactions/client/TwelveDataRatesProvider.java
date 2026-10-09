@@ -18,15 +18,40 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Adapter for a daily exchange rate provider exposing
- * {@code GET /time_series?symbol=BASE/QUOTE&interval=1day&date=YYYY-MM-DD} and
- * {@code GET /currency}.
+ * Wire adapter for <a href="https://twelvedata.com">Twelve Data</a>, and for no
+ * other provider.
  *
  * <p>
- * Specific to one provider's wire format. A second provider is a second
- * implementation of {@link RatesProvider}, registered as its own bean; nothing
- * here is shared with it beyond the contract, and the service layer does not
- * know this class exists.
+ * The name says so deliberately. The class used to be called
+ * {@code HttpRatesClient}, which described the transport and nothing else, so a
+ * reader had to open it to learn which provider it spoke to. It is bound to two
+ * endpoints whose shape is Twelve Data's own and is not a generic currency API:
+ *
+ * <ul>
+ * <li>{@code GET /time_series?symbol=BASE/QUOTE&interval=1day&date=YYYY-MM-DD}
+ * — answers
+ * {@code {"values": [{"datetime": …, "close": …, "previous_close": …}]}}.</li>
+ * <li>{@code GET /currency} — answers
+ * {@code {"data": [{"code": …, "name": …}]}}, used by the weekly sweep of the
+ * currency lookup.</li>
+ * </ul>
+ *
+ * <p>
+ * <strong>Why this provider and not another.</strong> The specification asks
+ * for the day's {@code close}, falling back to {@code previous_close} when
+ * there is none — a weekend or a holiday. That pair is a property of an
+ * exchange session, and Twelve Data's {@code /time_series} is the one endpoint
+ * among the three providers named in the task that returns both, for free, for
+ * a dated symbol. Alpha Vantage's free {@code CURRENCY_EXCHANGE_RATE} returns a
+ * live rate rather than a session close; Open Exchange Rates updates hourly
+ * from a reference rate and has no time series at all on its free plan. Adding
+ * either would mean a different adapter <em>and</em> a different meaning for
+ * {@code previous_close}, which is why the work is not a URL change.
+ *
+ * <p>
+ * A second provider is a second implementation of {@link RatesProvider},
+ * registered as its own bean. Nothing here is shared with it beyond the
+ * contract, and the service layer does not know this class exists.
  *
  * <p>
  * Retries and timeouts come from configuration, because the ingestion path must
@@ -38,11 +63,19 @@ import org.springframework.web.client.RestClient;
  * <p>
  * The client builds its own {@link RestClient} rather than injecting a builder:
  * Boot 4 does not contribute a {@code RestClient.Builder} bean.
+ *
+ * <p>
+ * Stubs live with the tests: {@code features/api/client_api.feature} drives
+ * this class against a WireMock server pointed at it through
+ * {@code app.rates.base-url}, so the request it builds — path, query
+ * parameters, and the JSON it parses — is exercised rather than assumed. The
+ * service scenarios replace the whole adapter with an in-process bean and
+ * therefore say nothing about it.
  */
 @Component
 @ConditionalOnProperty(name = "app.rates.base-url")
 @Slf4j
-public final class HttpRatesClient implements RatesProvider {
+public final class TwelveDataRatesProvider implements RatesProvider {
 
 	private final RestClient restClient;
 
@@ -50,7 +83,7 @@ public final class HttpRatesClient implements RatesProvider {
 
 	private final Retry retry;
 
-	public HttpRatesClient(AppProperties properties) {
+	public TwelveDataRatesProvider(AppProperties properties) {
 		this.properties = properties;
 		AppProperties.Rates rates = properties.rates();
 		this.restClient = RestClient.builder().baseUrl(rates.baseUrl()).requestFactory(requestFactory(rates))
@@ -152,7 +185,12 @@ public final class HttpRatesClient implements RatesProvider {
 	}
 
 	/**
-	 * Shape of the provider response.
+	 * Shape of the {@code /time_series} response.
+	 *
+	 * <p>
+	 * Only the fields the specification needs are mapped. The endpoint answers more
+	 * than this, and letting the rest in would put a second, unmapped version of
+	 * the same rate on the record.
 	 *
 	 * @param values
 	 *            one entry per day
@@ -163,7 +201,9 @@ public final class HttpRatesClient implements RatesProvider {
 		 * @param close
 		 *            the close of that day
 		 * @param previousClose
-		 *            the last close before it, used when {@code close} is absent
+		 *            the last close before it, the fallback the specification asks for
+		 *            on weekends and holidays; spelled {@code previous_close} on the
+		 *            wire and camel cased here
 		 */
 		record Value(BigDecimal close, @JsonProperty("previous_close") BigDecimal previousClose) {
 		}

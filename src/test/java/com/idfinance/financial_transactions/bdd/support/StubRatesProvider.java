@@ -4,6 +4,7 @@ import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * A rates provider that answers from a scenario's instructions instead of a
@@ -21,6 +22,10 @@ import java.time.LocalDate;
  * The ledger currency is read from {@link LedgerPolicy} rather than spelled
  * out, so a stub that hardcoded {@code USD} would pass today and stop passing
  * the day the ledger moved.
+ *
+ * <p>
+ * The published-currency listing is a third answer, set per scenario, because
+ * {@code WeeklyCurrencyImport} reads it and nothing else does.
  */
 public class StubRatesProvider implements RatesProvider {
 
@@ -28,12 +33,37 @@ public class StubRatesProvider implements RatesProvider {
 
 	private volatile Mode mode = Mode.UNKNOWN;
 
+	private volatile List<PublishedCurrency> published = List.of();
+
+	private volatile boolean currencyListingFails;
+
 	public StubRatesProvider(LedgerPolicy ledgerPolicy) {
 		this.ledgerPolicy = ledgerPolicy;
 	}
 
 	public void setMode(Mode mode) {
 		this.mode = mode;
+	}
+
+	/**
+	 * What {@link #publishedCurrencies()} will answer. The weekly sweep of the
+	 * currency lookup reads nothing else, so a scenario that wants to see it work
+	 * says here which codes the provider claims to publish.
+	 */
+	public void setPublishedCurrencies(PublishedCurrency... currencies) {
+		this.published = List.of(currencies);
+		this.currencyListingFails = false;
+	}
+
+	/**
+	 * Makes the currency listing throw, which is what a provider outage looks like
+	 * to the sweep. It has to be a distinct switch from {@link Mode#FAILING}: the
+	 * rate lookup and the currency listing fail independently, and a scenario that
+	 * covers one must not accidentally be covering the other.
+	 */
+	public void setCurrencyListingFails(boolean fails) {
+		this.currencyListingFails = fails;
+		this.published = List.of();
 	}
 
 	@Override
@@ -45,6 +75,14 @@ public class StubRatesProvider implements RatesProvider {
 			throw new IllegalStateException("The rates provider is unreachable");
 		}
 		return null;
+	}
+
+	@Override
+	public List<PublishedCurrency> publishedCurrencies() {
+		if (this.currencyListingFails) {
+			throw new IllegalStateException("The rates provider is unreachable");
+		}
+		return this.published;
 	}
 
 	@Override

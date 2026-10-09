@@ -8,11 +8,6 @@ import org.springframework.stereotype.Component;
 
 /**
  * Stand-in used when no provider is configured.
- *
- * <p>
- * Its purpose is to keep the application bootable and the tests hermetic: with
- * no configured base URL there is nothing to call, and pretending otherwise
- * would only turn missing configuration into a confusing runtime failure.
  */
 @Component
 @ConditionalOnMissingBean(RatesProvider.class)
