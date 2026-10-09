@@ -1,3 +1,17 @@
+# Optional convenience stack: Postgres + Redis + the service.
+#
+#   docker compose up -d db redis
+#   SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/financial \
+#   SPRING_DATASOURCE_USERNAME=financial SPRING_DATASOURCE_PASSWORD=financial \
+#   SPRING_DATA_REDIS_HOST=localhost ./mvnw spring-boot:run
+#
+# Or bring up everything, service included:
+#
+#   docker compose up --build -d
+#
+# Credentials and the provider key come from the environment (see .env.example), so nothing secret is
+# committed. The test suite does NOT use this file: Testcontainers provides both containers.
+
 services:
 
   db:
@@ -11,6 +25,15 @@ services:
       - "5432:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
+    # The server's own limit, not the app's. The app holds at most 20 connections per instance, so three
+    # replicas already need 60 of these; the formula and what happens past it are in the README. Raising
+    # this number is not a substitute for a pooler, because every connection still costs memory in the
+    # database process.
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+    mem_limit: 512m
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-financial} -d ${POSTGRES_DB:-financial}" ]
       interval: 5s
@@ -22,6 +45,17 @@ services:
     container_name: financial-redis
     ports:
       - "6379:6379"
+    # Without maxmemory a cache is the first thing to fill a container's memory, and Redis dies rather
+    # than evicting: the default policy is noeviction, so the failure mode is the cache being unavailable
+    # to the application. allkeys-lru is what a cache wants; it is the wrong policy for a queue, which is
+    # why this belongs to this container and not to a global default.
+    command:
+      - redis-server
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - allkeys-lru
+    mem_limit: 128m
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -38,6 +72,26 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-financial}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-financial}
       SPRING_DATA_REDIS_HOST: redis
+      # The provider's URL and key. Without the URL the TwelveDataRatesProvider is not registered at all
+      # and NoRatesProvider takes its place, so the application starts and silently never fetches a rate.
+      # Listing them here is what makes the value in .env reach the container: compose substitutes into
+      # the variables named in `environment` only, so a key defined in .env and not listed here is
+      # simply not passed.
+      RATES_API_BASE_URL: ${RATES_API_BASE_URL:-}
+      RATES_API_KEY: ${RATES_API_KEY:-}
+      RATES_SOURCE: ${RATES_SOURCE:-twelvedata}
+      # Without this the container runs on the defaults, which is not what production runs on: the
+      # pool would be ten, virtual threads on, and the health endpoint would describe its details.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-local}
+    # The JVM sizes itself from this, so it is not optional: with no limit the container sees the host's
+    # memory and MaxRAMPercentage is a share of that. See the README for how the three numbers — heap,
+    # pool, threads — are tied together.
+    mem_limit: 1g
+    volumes:
+      # A heap dump that lives in the container's writable layer disappears when the container does,
+      # which is the one moment its contents would have been read.
+      - dumps:/app/dumps
     depends_on:
       db:
         condition: service_healthy
@@ -46,3 +100,4 @@ services:
 
 volumes:
   db-data:
+  dumps:

@@ -88,12 +88,16 @@ jobs:
           done
 
       - name: Smoke-check the image
+        # -m 1g is not decoration: the JVM sizes its heap from the container's limit, so a run without
+        # one exercises a configuration nobody deploys. The memory limit here is the deployment's.
         run: |
-          docker run -d --name smoke-app --network financial-smoke -p 8080:8080 \
+          docker run -d --name smoke-app --network financial-smoke -p 8080:8080 -m 1g \
             -e SPRING_DATASOURCE_URL=jdbc:postgresql://smoke-db:5432/financial \
             -e SPRING_DATASOURCE_USERNAME=financial \
             -e SPRING_DATASOURCE_PASSWORD=financial \
             -e SPRING_DATA_REDIS_HOST=smoke-redis \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            -e DEPLOYMENT_ENVIRONMENT=ci \
             financial-transactions:ci
           for i in $(seq 1 30); do
             if docker exec smoke-app curl -fsS http://localhost:8080/actuator/health; then

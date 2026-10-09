@@ -13,14 +13,64 @@ spring:
     virtual:
       enabled: false
 
+  lifecycle:
+    # How long a shutdown waits for in-flight requests before they are cut. Paired with
+    # server.shutdown: graceful below, and sized against the database: a request holding
+    # PESSIMISTIC_WRITE on a limit row has to finish, not be interrupted.
+    timeout-per-shutdown-phase: 30s
+
   datasource:
     hikari:
-      # Virtual threads and Hikari are the same decision: whichever way this goes, the pool is the real
-      # limit on how much work can be in flight. Sized above the default of ten because every request that
-      # touches the flag holds a connection while it does so.
+      # The pool and the thread count below are one decision with two numbers, and neither is right on
+      # its own. The pool is the scarce resource: twenty connections, because every request that touches
+      # the flag holds one while it does, and a contended one holds it longer waiting on the row lock.
       maximum-pool-size: 20
       minimum-idle: 5
-      connection-timeout: 5000
+      # A second, not five. This is the honest end of the road: past it the caller is told the service is
+      # busy instead of being parked for five seconds and then told the same thing. With the thread count
+      # below, a second is long enough for a connection that is about to be returned and short enough that
+      # a pile-up does not turn into a queue of blocked threads holding client sockets.
+      connection-timeout: 1000
+      # A connection that has been idle longer than this is not coming back. Without it a database that
+      # restarted leaves the pool holding sockets nobody will notice until the next request needs one.
+      max-lifetime: 600000
+      # Must be lower than max-lifetime, and it is a trap rather than a rule: Hikari silently disables
+      # an idle-timeout that is at or above max-lifetime and logs a warning that looks like advice
+      # about something else. Five minutes leaves the margin.
+      idle-timeout: 300000
+      # Asks the database whether a pooled connection is still alive. Without it a connection the
+      # database dropped while it was idle survives in the pool until its lifetime expires, and the
+      # request that draws it gets a connection error instead of a fresh connection.
+      keepalive-time: 30000
+
+springdoc:
+  # Off here and on everywhere else, because springdoc warns about it on every production start and is
+  # right to: /v3/api-docs describes the whole internal surface, including the paths a client never sees.
+  # The specification asks for the API to be documented, which it is — open the UI in the `dev` profile,
+  # or set this back to true where publishing it is a deliberate decision rather than a default.
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+server:
+  # Let in-flight requests finish. The default is immediate, which for this service means cutting a
+  # request off while it holds a row lock: the transaction rolls back, the client sees a 500, and the
+  # deployment that caused the restart looks like the outage did.
+  shutdown: graceful
+  tomcat:
+    # Forty for twenty connections, and the reasoning is the same as the pool's timeout. The default is
+    # two hundred, which means a hundred and eighty threads can be alive doing nothing but waiting for a
+    # connection — each holding a stack and a client socket, and each making the failure arrive slower
+    # and less legibly than it otherwise would. Twice the pool leaves room for requests that never reach
+    # the database, such as the health probe, and no room for a pile-up to hide in.
+    threads:
+      max: 40
+      min-spare: 10
+    # A client that opens a connection and sends nothing holds a thread until this expires. Five seconds
+    # is the default and is generous for a JSON API.
+    connection-timeout: 5s
+    accept-count: 50
 
 logging:
   level:

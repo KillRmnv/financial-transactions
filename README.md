@@ -161,12 +161,23 @@ PostgreSQL and Redis:
 cp .env.example .env          # local credentials, .env is gitignored
 docker compose up -d db redis # the dependencies only
 
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/financial \
-SPRING_DATASOURCE_USERNAME=financial \
-SPRING_DATASOURCE_PASSWORD=financial \
+set -a && . ./.env && set +a  # POSTGRES_* and RATES_* into the environment
+
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/${POSTGRES_DB} \
+SPRING_DATASOURCE_USERNAME=${POSTGRES_USER} \
+SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD} \
 SPRING_DATA_REDIS_HOST=localhost \
 ./mvnw spring-boot:run
 ```
+
+Sourcing `.env` rather than copying three values by hand is what keeps the key and the compose stack in
+step: the URL is assembled from the same `POSTGRES_*` the database container was started with, so the
+two cannot drift into a connection refused.
+
+With `RATES_API_KEY` set, `RATES_API_BASE_URL` set and the provider reachable, the application fetches
+a rate on demand for a currency it has never seen. With the key empty it does not: no provider is
+registered, and every rate comes from the database — which is the correct behaviour on a cold start and
+a confusing one if it is not what you meant.
 
 Or bring the whole stack up at once, service included:
 
@@ -193,6 +204,88 @@ credential, quota or timezone is hardcoded.
 | `app.rates.api-key` | empty | provider key, from the environment |
 | `app.rate-limits.*` | see file | request quotas per endpoint (`limit-for-period`, `limit-refresh-period`) |
 | `app.scheduling.enabled` | `true` | the daily sweep and the weekly currency import; off in tests |
+| `app.cache.enabled` | `true` | whether rates are read through Redis; `false` is a supported configuration |
+| `app.cache.ttl` | `12h` | backstop lifetime of a cached rate; invalidation is by generation counter, not by expiry |
+| `app.cache.key-prefix` | `financial:rate:` | namespace, so a shared Redis does not receive these keys at its root |
+
+### Environment variables
+
+Everything below is read from the environment, and compose substitutes into **only the names listed under
+`environment:` in `docker-compose.yml`** — a variable defined in `.env` and not listed there is silently
+not passed. That is how `RATES_API_KEY` went missing once.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SPRING_DATASOURCE_URL` | — | **no default; the application refuses to start without it** |
+| `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` | — | as above |
+| `SPRING_DATA_REDIS_HOST` | `localhost` | the rate cache |
+| `RATES_API_BASE_URL` | empty | provider URL. Empty means no provider is registered at all: the application runs and reads rates from the database only |
+| `RATES_API_KEY` | empty | the provider key. A secret, so it lives in `.env`, which is gitignored |
+| `RATES_SOURCE` | `twelvedata` | written into `currency_rate.source` |
+| `SPRING_PROFILES_ACTIVE` | `prod` in compose | which profile to run |
+| `DEPLOYMENT_ENVIRONMENT` | `production` | metric tag, so one dashboard holds several deployments |
+
+### JVM flags
+
+`JAVA_TOOL_OPTIONS` in the `Dockerfile` carries them, because the JVM reads that variable itself and a
+deployment can therefore override any of it without rebuilding the image.
+
+| Flag | Why |
+| --- | --- |
+| `-XX:MaxRAMPercentage=70` | heap ceiling as a share of the container's memory limit, not an absolute `-Xmx` — an absolute number in a layer is a number somebody forgets to recompute. **It needs `mem_limit`**: without one the container sees the host's memory and 70% of that is nobody's decision |
+| `-XX:InitialRAMPercentage=35` | start nearer the ceiling than the default 1/70th, so the heap is not resized upward under load |
+| `-XX:MaxMetaspaceSize=128m` | the heap percentage does not cover metaspace, and an unbounded one is how a leak there kills a container whose heap was never touched |
+| `-XX:+HeapDumpOnOutOfMemoryError` | write the heap out when it is exhausted |
+| `-XX:+ExitOnOutOfMemoryError` | exit rather than limp on, and let the orchestrator restart |
+| `-XX:ErrorFile` | where the `hs_err` log of a native crash goes — there is **no** flag that dumps the heap on a crash, HotSpot has no such facility |
+
+`/app/dumps` is a volume in compose. A dump in the container's writable layer disappears with the
+container, which is the one moment its contents would have been read.
+
+### Memory, threads, connections
+
+Three numbers that are one decision:
+
+| | value | why that number |
+| --- | --- | --- |
+| container memory | 1 GB | the budget everything below is a share of |
+| heap | 70% of 1 GB | leaves ~300 MB for metaspace, the code cache, thread stacks and the mapped jar, none of which the heap percentage covers |
+| JDBC pool | 20 | the scarce resource. Every request that touches the flag holds a connection, and under contention it holds one *longer*, waiting on the row lock |
+| Tomcat threads | 40 | twice the pool. The default is 200, which allows 180 threads alive doing nothing but waiting for a connection — each holding a stack and a client socket |
+| pool timeout | 1 s | the honest end of the road. Past it the caller is told the service is busy rather than parked for five seconds and told the same thing |
+| graceful shutdown | 30 s | long enough for a request holding `PESSIMISTIC_WRITE` to finish. The default is to cut in-flight requests immediately, which rolls the transaction back, returns a 500, and makes the deployment that caused the restart look like the outage |
+
+The reasoning behind 40 and 1 s rather than 200 and 5 s: with more threads than connections, overload
+surfaces as a queue of blocked threads holding client sockets, and the failure arrives slowly and looks
+like a bug. With the counts tied together, `hikaricp.connections.pending` and
+`hikaricp.connections.timeout` rise exactly when the pool is the constraint, which is the signal worth
+being paged for. Note the prefix: Micrometer registers the Hikari meters as **`hikaricp.*`**, not
+`hikari.*`, and a dashboard querying the latter shows an empty series rather than an error.
+
+There are **no Tomcat thread meters** in Boot 4 — only `tomcat.sessions.*`. Thread counts are read with
+`jcmd <pid> Thread.print | grep -c http-nio` against a running container, which is a diagnostic rather
+than something to scrape, and the honest reason for that is that a thread pool large enough to be
+interesting is a pool that should not have been sized that way.
+
+`jvm.memory.max` reports the **old generation only** under G1, not the whole heap, so it reads about
+250 MB on a container whose `MaxHeapSize` is 718 MB. Confirm the real ceiling with
+`-XX:MaxRAMPercentage` in `-Xlog:os+container=debug -XX:+PrintFlagsFinal` rather than from the metric.
+
+**Against the database.** Each instance holds at most `maximum-pool-size` connections, so:
+
+```
+replicas × 20  +  reserved superusers (3)  +  migrations at start-up  <  max_connections
+```
+
+At the compose default of 100, that leaves room for three replicas (60 + 3 + Flyway) and **not** for
+five. Past the limit the symptom is not an error but a hang: connections queue inside the database's
+accept path while the application reports itself healthy. Raising `max_connections` postpones that
+rather than fixing it, because every connection still costs memory in the database process — a pooler
+in front (PgBouncer) is what removes it, and adding one is a separate decision from this one.
+
+Redis carries `maxmemory 64mb` and `allkeys-lru`. Without them the default policy is *noeviction*, so a
+full Redis does not evict: it starts refusing, and the application correctly falls back to the database
+— the cache stops helping while still being paid for.
 
 ### Profiles
 
@@ -201,11 +294,13 @@ credential, quota or timezone is hardcoded.
 
 | | what changes |
 |---|---|
-| `dev` | DEBUG logging, quotas effectively lifted, and the `heapdump` actuator endpoint opened |
-| `prod` | Hikari sized for the flag's row lock, no health details, no `heapdump`, and virtual threads deliberately off |
+| `dev` | DEBUG logging, quotas effectively lifted, the `heapdump` actuator endpoint opened, and the Swagger UI on |
+| `prod` | Hikari and Tomcat sized as described above, graceful shutdown, no health details, no `heapdump`, no Swagger UI, and virtual threads deliberately off |
 
 `heapdump` is a full dump of the process — credentials, tokens, customer rows — so it is opened in
-`dev` and nowhere else.
+`dev` and nowhere else. The Swagger UI is closed in `prod` for a related reason: `/v3/api-docs`
+describes the whole internal surface, not just the two documented APIs. Both are one property away from
+being open, in a deployment where publishing them is a decision rather than a default.
 
 ### Metrics
 

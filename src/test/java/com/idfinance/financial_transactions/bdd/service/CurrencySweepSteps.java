@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.bdd.service;
 
+import com.idfinance.financial_transactions.bdd.support.StoredWorldCleaner;
 import com.idfinance.financial_transactions.bdd.support.StubRatesProvider;
 import com.idfinance.financial_transactions.client.WeeklyCurrencyImport;
 import com.idfinance.financial_transactions.entity.Currency;
@@ -51,6 +52,9 @@ class CurrencySweepSteps {
 	private CurrencyRepository currencyRepository;
 
 	@Autowired
+	private StoredWorldCleaner storedWorldCleaner;
+
+	@Autowired
 	private ExpenseTransactionRepository expenseTransactionRepository;
 
 	@Autowired
@@ -63,6 +67,11 @@ class CurrencySweepSteps {
 
 	@Before
 	void rememberTheLookup() {
+		// The tables are cleaned through the shared cleaner rather than here, so that a
+		// scenario in this file starts in the same state as every other one and leaves
+		// the same state behind. Two scenarios in one suite that each clean differently
+		// is how a cache survives a delete.
+		this.storedWorldCleaner.clean();
 		this.codesBeforeSweep = codesInLookup();
 		this.stubRatesProvider.setPublishedCurrencies();
 		this.stubRatesProvider.setCurrencyListingFails(false);
