@@ -6,6 +6,7 @@ import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.ExpenseCategory;
 import com.idfinance.financial_transactions.entity.ExpenseLimit;
 import com.idfinance.financial_transactions.exception.NotFoundException;
+import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import com.idfinance.financial_transactions.repository.ExpenseCategoryRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
@@ -38,6 +39,8 @@ public class LimitService {
 
 	private final LedgerPolicy ledgerPolicy;
 
+	private final MetricsRecorder metricsRecorder;
+
 	private final Clock clock;
 
 	/**
@@ -61,6 +64,7 @@ public class LimitService {
 		ExpenseLimit installed = this.expenseLimitRepository.save(new ExpenseLimit(request.accountFrom(),
 				category.getId(), ledger, this.ledgerPolicy.round(request.sum()), Instant.now(this.clock)));
 
+		this.metricsRecorder.limitInstalled(category.getCode());
 		log.info("Installed a {} {} {} limit for account {} at {}", request.sum(), ledger.getCode(), category.getCode(),
 				request.accountFrom(), installed.getCreatedAt());
 		return installed;

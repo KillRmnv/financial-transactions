@@ -4,6 +4,7 @@ import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.CurrencyRate;
+import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -22,18 +23,32 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>
  * The specification asks for external data to be paid for and slow, so the
  * local table is always consulted first and the external call is a fallback,
- * not the default path.
+ * not the default path. The metrics distinguish the two, because how often the
+ * service pays for a rate it already had is the number that decides whether the
+ * daily sweep is configured generously enough.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ExchangeRateService {
 
+	/**
+	 * The transaction is already in the ledger currency, so no rate was looked up
+	 * at all.
+	 */
+	private static final String SOURCE_IDENTITY = "identity";
+
+	private static final String SOURCE_DATABASE = "database";
+
+	private static final String SOURCE_EXTERNAL = "external";
+
 	private final CurrencyRateRepository currencyRateRepository;
 
 	private final RatesProvider ratesProvider;
 
 	private final LedgerPolicy ledgerPolicy;
+
+	private final MetricsRecorder metricsRecorder;
 
 	/**
 	 * Converts an amount into the ledger currency for the day the transaction
@@ -46,21 +61,27 @@ public class ExchangeRateService {
 	@Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
 	public Conversion convert(BigDecimal amount, Currency currency, LocalDate rateDate) {
 		if (this.ledgerPolicy.isLedgerCurrency(currency.getCode())) {
+			this.metricsRecorder.rateResolved(SOURCE_IDENTITY, this.ledgerPolicy.currencyCode());
 			return new Conversion(this.ledgerPolicy.round(amount), BigDecimal.ONE, rateDate);
 		}
 
-		Optional<ExchangeRate> stored = findStored(currency, rateDate).or(() -> fetchAndStore(currency, rateDate));
+		Optional<ExchangeRate> stored = findStored(currency, rateDate);
+		String source = SOURCE_DATABASE;
+		if (stored.isEmpty()) {
+			stored = fetchAndStore(currency, rateDate);
+			source = SOURCE_EXTERNAL;
+		}
 		if (stored.isEmpty()) {
 			return Conversion.unavailable();
 		}
 
 		ExchangeRate rate = stored.orElseThrow();
 		BigDecimal effective = rate.effectiveRate();
+		this.metricsRecorder.rateResolved(source, this.ratesProvider.name());
 		log.debug("Converting {} {} at {} (rate {} from {})", amount, currency.getCode(), effective, rate.rateDate(),
 				this.ratesProvider.name());
 		// Multiply first, round once: rounding the rate would destroy the only
-		// precision
-		// the conversion has.
+		// precision the conversion has.
 		return new Conversion(this.ledgerPolicy.round(amount.multiply(effective)), effective, rate.rateDate());
 	}
 
@@ -98,8 +119,8 @@ public class ExchangeRateService {
 			// The provider is down or slow. The transaction is still accepted, just without
 			// a flag, and the
 			// pending rows are recalculated later. Swallowing it here rather than
-			// propagating is
-			// the decision that keeps ingestion lossless.
+			// propagating is the decision
+			// that keeps ingestion lossless.
 			log.warn("Could not obtain the rate for {}/{} on {}: {}", currency.getCode(), ledger, rateDate,
 					ex.getMessage());
 			return Optional.empty();

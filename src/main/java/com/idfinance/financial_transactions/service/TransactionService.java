@@ -9,6 +9,7 @@ import com.idfinance.financial_transactions.entity.ExpenseLimit;
 import com.idfinance.financial_transactions.entity.ExpenseTransaction;
 import com.idfinance.financial_transactions.exception.NotFoundException;
 import com.idfinance.financial_transactions.mapper.TransactionMapper;
+import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import com.idfinance.financial_transactions.repository.ExpenseCategoryRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
@@ -45,6 +46,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class TransactionService {
 
+	/**
+	 * Outcomes are a closed set, because they are a metric tag and a tag with a
+	 * typo is a silent hole.
+	 */
+	private static final String FLAGGED = "flagged";
+
+	private static final String WITHIN_LIMIT = "within_limit";
+
+	private static final String UNCALCULATED = "uncalculated";
+
 	private final ExpenseTransactionRepository expenseTransactionRepository;
 
 	private final ExpenseLimitRepository expenseLimitRepository;
@@ -62,6 +73,8 @@ public class TransactionService {
 	private final BigDecimal defaultLimitSum;
 
 	private final LedgerPolicy ledgerPolicy;
+
+	private final MetricsRecorder metricsRecorder;
 
 	private final Clock clock;
 
@@ -99,6 +112,7 @@ public class TransactionService {
 			log.warn("Stored a transaction of {} {} without a flag: no exchange rate available", transaction.getSum(),
 					currency.getCode());
 			this.expenseTransactionRepository.save(transaction);
+			this.metricsRecorder.transactionAccepted(UNCALCULATED);
 			return accepted;
 		}
 		transaction.recordConversion(conversion.sumInLedger(), conversion.rate(), conversion.rateDate());
@@ -135,6 +149,7 @@ public class TransactionService {
 		boolean exceeded = runningTotal.compareTo(limit.getSum()) > 0;
 
 		transaction.assignFlag(limit.getId(), exceeded);
+		this.metricsRecorder.transactionAccepted(exceeded ? FLAGGED : WITHIN_LIMIT);
 		log.info("Account {} spent {} of a {} {} limit this month; transaction {} exceeded", limit.getAccountFrom(),
 				runningTotal, limit.getSum(), category.getCode(), exceeded);
 	}
