@@ -49,3 +49,7 @@ build/
 *.orig
 *.rej
 .merge_lock
+
+### The assignment document itself ###
+# It is the task, not part of the solution: committing it puts the grader's brief in the repo.
+Тестовое_задание_*.md
