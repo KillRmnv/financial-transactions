@@ -102,7 +102,9 @@ This is not Boot 3. `spring-boot-starter-web`, `-test`, `-data-jpa-test` etc. no
 
 `cucumber.version` is pinned because **Cucumber 8.0.4 is built against Spring 7.0.9**, which is exactly what the Boot 4.0.8 parent pulls, and it resolves JUnit Platform 6.0.3 — the version Boot 4 manages. Do not drop it to a 7.x line: `cucumber-spring` 7.x targets an older Spring and would break the `@CucumberContextConfiguration` wiring.
 
-`wiremock-standalone` is declared but no test uses it: the end-to-end suite stubs the provider with a bean, so no test needs an extra HTTP stub server. Do not add WireMock usage without removing that decision first.
+**There are two rates stubs and each suite picks one on purpose.** `StubRatesConfiguration` publishes an in-process `StubRatesProvider` and the service and quota suites import it; `WireMockRatesConfiguration` starts a server and points the *real* `HttpRatesClient` at it through `app.rates.base-url`, which the API suite imports. An in-process bean replaces the whole client, so the request the adapter builds — the path, the query parameters, the JSON it parses — is never exercised. Only the WireMock suite exercises it, and it is the only one that can say anything about the adapter. `BddInfrastructureConfiguration` deliberately holds neither: clock and `RestClient.Builder` only, so adding a stub to the wrong suite is an import you can see.
+
+**A `/` inside a Cucumber expression is an alternation, not a character.** `"the provider answers {string}/{string}"` fails to parse with `Alternative may not be empty` at the slash, and the failure surfaces on every scenario in the run rather than on the one that used it, because the expression is compiled per pickle. Write `against` instead.
 
 ## Testing pitfalls
 
@@ -142,7 +144,7 @@ More Gherkin 42 behaviour worth knowing before writing a feature:
 |---|---|---|
 | `bdd/LimitFlagRuleFeatureTest` | `features/rule` | `@ContextConfiguration`, no Boot, no database — runs in ~200 ms |
 | `bdd/service/ServiceFeatureTest` | `features/service` | `@SpringBootTest` + Testcontainers |
-| `bdd/api/ApiFeatureTest` | `features/api` | `RANDOM_PORT` + Testcontainers |
+| `bdd/api/ApiFeatureTest` | `features/api` | `RANDOM_PORT` + Testcontainers + a WireMock rates provider |
 | `bdd/quota/QuotaFeatureTest` | `features/quota` | `RANDOM_PORT` + a 3-token quota via `@TestPropertySource` |
 
 **One Cucumber run cannot carry two Spring contexts**, because `@CucumberContextConfiguration` is resolved once per run. That is why there are four runners rather than one, and why the quota suite is separate: the buckets live in a map inside the interceptor for the lifetime of the context, so sharing one context would let the API scenarios spend the quota the quota scenarios are trying to exhaust.
@@ -192,6 +194,7 @@ Where each lives:
 - Schema-first migrations: Flyway scripts in `src/main/resources/db/migration`. Right now there is exactly one, `V1__init.sql`. Schema changes go in a new versioned migration, never by hand-editing an applied one.
 - **A CHECK constraint cannot contain a subquery in PostgreSQL.** When a rule needs to consult another table, use a foreign key; do not reach for a trigger to work around it.
 - **A repository method is declared only when something calls it.** `JpaRepository` already supplies `findAll`, `findById`, `save` and `count`; anything else must have a caller today. Speculative query methods are untested code that rots.
+- **A report is one statement, not a loop.** `ExpenseLimitRepository.reportForAccount` is the specification's JOIN-with-a-subquery, an-aggregate-and-a-grouping in one native query: the limits, joined to `expense_category` and `currency` for their codes, left-joined to a grouped subquery over the month's transactions. The previous shape asked for the month total and the category once per limit, which is an N+1 whose length grows every time a client raises a limit — precisely the account that reads this report most often. **Keep it that way:** a second per-row lookup here is the same defect in a different place, and `features/api/client_api.feature` asserts the numbers it produces.
 - Configuration only through properties and environment variables. No hardcoded URLs, credentials, quotas, timezone constants or currency codes.
 
 ## Domain rules that are easy to get wrong
@@ -205,7 +208,7 @@ Where each lives:
 - A new limit does **not** reset what was already spent: on 10.01 the remaining balance is 900 = 2000 − 1100, so transactions predating the new limit still count toward the month's total.
 - The `Остаток` column of the second case in the spec is arithmetically wrong (it says −200 where 400 − 900 = −500). The flag column is consistent with the rule above. Trust the rule, not that column.
 - Concurrent transaction posts for the same client must not both observe the same remaining balance. The concurrent-posts scenario in `features/service/limit_flag_scenario.feature` verifies this, and it is a real check rather than a formality: with the row lock removed it reports 1 flagged transaction instead of 2, because two threads read the same running total. The lock is `ExpenseLimitRepository.lockEffectiveOn` (a `@Lock(PESSIMISTIC_WRITE)` query, `order by createdAt desc, id desc`, first row wins), and the balance is never computed outside the transaction boundary.
-- **Do not "simplify" the default-limit creation into a read-then-write.** `createDefaultIfAbsent` is a native `insert … on conflict do nothing` relying on the partial unique index `ux_expense_limit_default`. A Java-side `exists()` check before inserting lets two concurrent first transactions both create a limit.
+- **Do not "simplify" the default-limit creation into a read-then-write.** `createDefaultIfAbsent` is a native `insert … select … where not exists (…) on conflict do nothing`. The index `ux_expense_limit_default` is partial on `is_default`, so `on conflict` alone only sees the default rows: without the `not exists` guard a client that installed its own 2000 USD limit still gets a 1000 USD default row beside it. Flags are unaffected — the installed limit is the later one and wins — but `GET /limits` then reports a limit nobody asked for, and the specification says the fallback stands in for a limit that was **not** set. The idempotency is unchanged by the guard: two concurrent first transactions race the index, not the guard.
 - The rate is resolved **before** the lock is taken: an external call takes seconds, and holding a row lock across it would block every other transaction of the client.
 
 ## Where the money logic lives
@@ -286,8 +289,8 @@ Two workflows, split by cost. The split is about *your* wait time, not a quota.
 
 `.gitignore` ignores `.env*` and then re-admits `.env.example` with a negation, so a future `.env.production` is covered automatically while the template stays tracked. **`.env.example` must never contain real credentials.**
 
-Known gaps: no `.agents/skills/<name>/SKILL.md` (Agent Skills format; symlink `.claude/skills` → `.agents/skills`), no Redis rate-limit cache (optional in the spec), a single rates provider with no failover, and the repository still has no commits and no remote.
+Known gaps: no Redis rate-limit cache (optional in the spec), a single rates provider with no failover, no MCP server over this API (also optional in the spec), and the repository has no remote. The skill at `.agents/skills/changing-limit-behaviour/SKILL.md` (with `.claude/skills` symlinked to `.agents/skills`, so both harnesses find it) covers the flag rule, the lock and the fallback; it is deliberately about one area rather than a summary of `AGENTS.md`.
 
-**The missing commits cost real work once already.** Every file was untracked, so an `rm -rf src/test/java/com/idfinance` — meant for a fixtures package inside that tree — took the twenty-one test sources with it and there was nothing to restore from. They came back by decompiling `target/test-classes`, which recovered the logic and lost the comments, and the surviving `features/*.feature` files are what made the behaviour verifiable afterwards. Make the first commit before the second bad command.
+**The period without commits cost real work once.** Every file was untracked, so an `rm -rf src/test/java/com/idfinance` — meant for a fixtures package inside that tree — took the twenty-one test sources with it and there was nothing to restore from. They came back by decompiling `target/test-classes`, which recovered the logic and lost the comments, and the surviving `features/*.feature` files were what made the behaviour verifiable afterwards. Before any `rm -rf` inside `src/`, check `find <path> -type f | wc -l` and `git ls-files <path>`; `git status` on an untracked tree tells you nothing useful.
 
-`.mcp.json` sits at the repository root (uncommitted like everything else) and wires two servers: **Context7** for library documentation, and **postgres-mcp** for read-only SQL against the development database. The PostgreSQL server is configured with `default_transaction_read_only=on` and `statement_timeout=5000` on purpose — a writable agent connection to a development database is how a table disappears, and the guard belongs in the config rather than in the instructions.
+`.mcp.json` sits at the repository root and wires two servers: **Context7** for library documentation, and **postgres-mcp** for read-only SQL against the development database. The PostgreSQL server is configured with `default_transaction_read_only=on` and `statement_timeout=5000` on purpose — a writable agent connection to a development database is how a table disappears, and the guard belongs in the config rather than in the instructions.

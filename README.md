@@ -340,9 +340,16 @@ details.
 conventions, the verified behaviour of the flag rule and the toolchain quirks discovered along
 the way.
 
-**Which MCP server and why.** None is connected yet. The obvious candidate is a PostgreSQL MCP
-server in read-only mode, which would let an agent inspect the real schema and data without
-guessing at column names — worth adding once the data model stops changing.
+**Which MCP servers and why.** Two, configured in `.mcp.json`:
+
+- **Context7**, for library documentation. Boot 4 renamed enough of Spring's coordinates that
+  "the artifact I remember" is frequently wrong; looking the current one up costs less than
+  discovering it from a compile error.
+- **PostgreSQL**, against the development database, read-only. An agent that can read the schema
+  and the rows does not have to guess column names, and the connection carries
+  `default_transaction_read_only=on` and `statement_timeout=5000` in the URI rather than in these
+  instructions: a guard that lives in a prompt can be forgotten, and a writable agent connection
+  to a development database is how a table disappears.
 
 **Where AI got it wrong, and how that was noticed.** Worth recording, because the failures are
 instructive:
@@ -371,11 +378,40 @@ implementation.
 decision to store the limit on the transaction row. Those encode the specification rather than
 a pattern, so they were reasoned about rather than generated.
 
-**How to apply the skill.** `.agents/skills/` is not populated yet. When it is, the intended
-entry points are `domain/LimitFlagRule` for changing the rule, and
-`features/service/limit_flag_scenario.feature` for changing anything that touches it — the
-scenario reads as an English description of the behaviour, so it is the cheapest place to look
-before touching the flag logic.
+**How to apply the skill.** `.agents/skills/changing-limit-behaviour/SKILL.md` is the entry point
+for anything that touches the flag rule, the month boundary or the lock. It names the files to
+read, the scenario to run first, and the two ways the change is most easily wrong: a limit that
+reaches back before its installation date, and a running total read outside the lock. Run
+`./scripts/ci.sh` rather than `mvn test` — it pins the JDK and adds the format check.
+
+## Estimate of the work
+
+The specification asks for an estimate up front, so here is the one I would have given before
+starting, and what actually happened against it.
+
+| Part | Estimate | Notes |
+|---|---|---|
+| Schema, migration, seed | 3 h | Mostly deciding what the schema refuses: currency codes, flag state, default limits |
+| Domain: flag rule, month boundary, rounding | 2 h | The rule is one comparison; the month boundary and the timezone are where the care goes |
+| Conversion and the rates provider | 4 h | Provider adapter, the three-step lookup chain, retry and timeout |
+| Transaction posting with the lock | 4 h | The row lock, the running total, and getting the default limit created without a race |
+| Both APIs, validation, problem details | 4 h | |
+| Tests | 12 h | Truth tables from the specification, boundary values, four BDD suites, Testcontainers |
+| Docker, CI/CD, documentation | 4 h | |
+| **Total** | **33 h** | About two weeks of full-time work |
+
+Two places where the estimate would have been wrong, which is the useful part:
+
+- **Concurrency was the whole of the difference between a correct service and an incorrect one.**
+  The lock is four lines of code. Knowing where it belongs — after the rate is resolved, before the
+  month total is read, and never skipped — is what the concurrent-posts scenario tests, and that
+  scenario is the reason the estimate had room for tests at all.
+- **The specification's own second table has an arithmetic error** in its remaining-balance column.
+  Had the tests been written from the table rather than from the flag column, they would have
+  asserted a wrong number and passed.
+
+The parts of the specification marked optional were deliberately left out and listed under known
+gaps rather than built quietly: the Redis rate cache and the MCP server over this API.
 
 ## Accounts
 
@@ -384,8 +420,10 @@ table**. The specification says one thing about accounts — "строка из 
 a field format, not an entity. Normalising accounts would need facts about them that nobody has
 specified: who owns the account, its currency, whether it is closed. Adding a table for a string
 that is already unique by definition would be structure without a question behind it.
-- No `.agents/skills/` directory, no MCP configuration, and no commits yet.
 - `application.yml` has no datasource section by design; see the run instructions.
+- The API suite stubs the external provider with WireMock; the service suite stubs it in-process.
+  The adapter's own retry and timeout policy is configured but not exercised against a slow or
+  flaky server, only against a 503 that never succeeds.
 - Rates are not cached in Redis. The specification lists that as optional, and it would be
   worth it only if the database lookup showed up as a bottleneck.
 - `exchange_rate` has no index on `(base_currency, rate_date)` beyond its unique constraint; the
