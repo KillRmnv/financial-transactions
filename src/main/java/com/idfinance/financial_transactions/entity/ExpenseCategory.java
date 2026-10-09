@@ -19,7 +19,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "expense_category")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class ExpenseCategory {
+public final class ExpenseCategory {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)

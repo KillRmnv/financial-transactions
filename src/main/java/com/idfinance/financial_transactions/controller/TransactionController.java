@@ -8,6 +8,7 @@ import com.idfinance.financial_transactions.service.TransactionService;
 import com.idfinance.financial_transactions.web.RateLimited;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,7 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/transactions")
 @RequiredArgsConstructor
 @Tag(name = "Transactions", description = "Ingestion of expense operations from the banking systems.")
-public class TransactionController {
+public final class TransactionController {
 
 	private final TransactionService transactionService;
 
@@ -47,6 +48,8 @@ public class TransactionController {
 			computed at all: a currency with no available rate is stored with `limitCalculated` false
 			rather than being rejected or guessed at.""")
 	@ApiResponse(responseCode = "201", description = "Stored")
+	@io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "application/json", examples = @ExampleObject(name = "kztTransaction", summary = "A tenge expense", value = "{\"accountFrom\":\"0000000123\",\"accountTo\":\"9999999999\",\"currencyShortname\":\"KZT\","
+			+ "\"sum\":10000.45,\"expenseCategory\":\"product\",\"datetime\":\"2022-01-30T00:00:00+06:00\"}")))
 	@ApiResponse(responseCode = "400", description = "The body failed validation", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "Unknown category or currency", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))

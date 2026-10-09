@@ -28,7 +28,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "currency")
 @Getter
 @NoArgsConstructor(access = lombok.AccessLevel.PROTECTED)
-public class Currency {
+public final class Currency {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)

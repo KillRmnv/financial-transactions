@@ -30,7 +30,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "expense_limit")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class ExpenseLimit {
+public final class ExpenseLimit {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -54,8 +54,8 @@ public class ExpenseLimit {
 	private Instant createdAt;
 
 	/**
-	 * Marks the automatically created 1000 USD limit, which the database uses to
-	 * deduplicate it.
+	 * Marks the automatically created limit, which the database uses to deduplicate
+	 * it.
 	 */
 	@Column(name = "is_default", nullable = false)
 	private boolean defaultLimit;

@@ -32,7 +32,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 @Slf4j
-public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
 	private static final String TYPE_PREFIX = "https://financial-transactions.idfinance.com/problems/";
 

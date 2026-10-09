@@ -9,7 +9,9 @@ import com.idfinance.financial_transactions.service.ReportingService;
 import com.idfinance.financial_transactions.service.TransactionService;
 import com.idfinance.financial_transactions.web.RateLimited;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,7 +43,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
 @Tag(name = "Limits", description = "Client-facing operations on monthly spend limits.")
-public class LimitController {
+public final class LimitController {
 
 	private final LimitService limitService;
 
@@ -56,6 +58,7 @@ public class LimitController {
 			moment: there is no date in the body, which is what makes backdating impossible. A client
 			may install as many limits as it likes; only updating an existing one is forbidden.""")
 	@ApiResponse(responseCode = "201", description = "Installed")
+	@io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "application/json", examples = @ExampleObject(name = "raiseTheJanuaryLimit", summary = "Raising the limit to 2000", value = "{\"accountFrom\":\"0000000123\",\"expenseCategory\":\"product\",\"sum\":2000.00}")))
 	@ApiResponse(responseCode = "400", description = "The body failed validation", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "Unknown category", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
@@ -85,7 +88,8 @@ public class LimitController {
 			+ "against it in the current month.")
 	@ApiResponse(responseCode = "200", description = "The limits, newest first")
 	@GetMapping("/limits")
-	List<LimitResponse> findAll(@RequestParam("account_from") String accountFrom) {
+	List<LimitResponse> findAll(
+			@Parameter(description = "The account to list limits for", example = "0000000123") @RequestParam("account_from") String accountFrom) {
 		return reportingService.limitsOf(accountFrom).stream().map(row -> toResponse(accountFrom, row)).toList();
 	}
 
@@ -96,8 +100,10 @@ public class LimitController {
 			event of its own.""")
 	@ApiResponse(responseCode = "200", description = "The exceeded transactions, oldest first")
 	@GetMapping("/limits/exceeded")
-	List<TransactionWithLimitResponse> exceeded(@RequestParam("account_from") String accountFrom,
-			@RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
+	List<TransactionWithLimitResponse> exceeded(
+			@Parameter(description = "The account to report on", example = "0000000123") @RequestParam("account_from") String accountFrom,
+
+			@Parameter(description = "First day of the month to report. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01") @RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
 		return reportingService.exceededInMonth(accountFrom, month).stream().map(this::toResponse).toList();
 	}
 
