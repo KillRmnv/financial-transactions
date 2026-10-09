@@ -1,0 +1,293 @@
+# AGENTS.md
+
+Spring Boot 4.0.8 / Java 25 Maven microservice for monthly USD spend limits and currency conversion.
+
+## Source of truth
+
+`Тестовое_задание_Junior_Java_разработчика_2026.md` (Russian) is the specification. Read it before implementing anything. It defines:
+- the input/output JSON contract (`account_from`, `account_to`, `currency_shortname`, `sum`, `expense_category`, `datetime`; responses add `limit_sum`, `limit_datetime`, `limit_currency_shortname`),
+- the `limit_exceeded` truth tables ("1 случай" / "2 случай") that define correct behaviour,
+- requirements 1–11 and the optional `*` extras.
+
+Where this file and that document disagree, the document wins.
+
+## Toolchain: JDK and the Lombok pin
+
+The pom sets `<java.version>25</java.version>`, but only two JDKs are installed here: **21** (`/usr/lib/jvm/java-21-openjdk`, which is also `JAVA_HOME=/usr/lib/jvm/default`) and **27** (`/usr/lib/jvm/java-27-openjdk`). `javac` 21 rejects `--release 25` outright, so **JDK 27 is the only usable JDK locally**; CI installs JDK 25 because that is what the pom targets. A CI-only failure that looks like a compilation or annotation-processing bug is usually that difference.
+
+The pom pins `<lombok.version>1.18.48</lombok.version>`. Do not remove it: the version the Boot 4.0.8 parent provides (1.18.46) crashes on JDK 27 with `ExceptionInInitializerError: com.sun.tools.javac.tree.EndPosTable`, which fails the build in `compiler:default-compile` with no useful context.
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-27-openjdk
+./scripts/ci.sh                    # format check + tests + SpotBugs  (the local CI equivalent)
+./scripts/ci.sh --fix              # reformat instead of checking
+./scripts/ci.sh -Dtest=Foo         # pass Maven args through
+./mvnw test                        # tests only (needs Docker)
+./mvnw test -Dtest=ClassName       # single class
+./mvnw test -Dtest=ClassName#method# single method
+./mvnw spotbugs:check              # static analysis standalone
+```
+
+Do not use bare `mvn`: system Maven 3.9.16 is installed and works, but it inherits `JAVA_HOME` (Java 21) and fails on `--release 25`. `scripts/ci.sh` pins `JAVA_HOME` itself when the current one has no `javac`. The wrapper is cached (`~/.m2/wrapper/dists/apache-maven-3.9.16-bin`, `distributionType=only-script`), so no download happens. Maven Central is reachable; no private repo and no `settings.xml`.
+
+## Running the app
+
+The app refuses to start without a `DataSource`, and `application.yml` has no datasource section by design. Anything outside tests must supply `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` and `SPRING_DATA_REDIS_HOST`.
+
+```bash
+cp .env.example .env                # .env is gitignored; compose reads it
+docker compose up -d db redis       # dependencies only, no image build
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/financial \
+SPRING_DATASOURCE_USERNAME=financial SPRING_DATASOURCE_PASSWORD=financial \
+SPRING_DATA_REDIS_HOST=localhost ./mvnw spring-boot:run
+
+docker compose up --build -d        # service + db + redis in one command
+```
+
+Tests do **not** use compose; Testcontainers brings its own containers.
+
+## Mapping: MapStruct is mandatory
+
+Hand-written DTO↔Entity converters are not allowed. `TransactionMapper` is the pattern to copy.
+
+- If a mapping cannot be expressed declaratively, use `default` methods — **not** a `toDto()` method on a service or a static utility.
+- **Never build a response DTO by hand in a controller.** That is the failure this rule exists to prevent, and it is easy to commit by accident: a twelve-argument `new TransactionWithLimitResponse(...)` with a ternary per optional field is unreadable, and no change to it breaks at compile time. Put the awkward parts in a named `default` method on the mapper.
+- **Name every `source`, including the ones that already match.** An implicit mapping silently stops working the day a field is renamed, and the compiler says nothing. Only `ignore = true` needs no source.
+- `unmappedTargetPolicy = ReportingPolicy.ERROR`: adding a field to an entity breaks the build until the mapper names it. That is the point.
+- Mappers live in a `mapper` subpackage beside the layer they serve.
+- **Pass server-decided values as parameters, not as `@Mapping(expression = ...)`.** An inline expression makes MapStruct emit a bare dereference that SpotBugs then flags in generated code, and the fix belongs in the call signature rather than in a suppression.
+- **Build gotcha:** MapStruct must be in `annotationProcessorPaths` for *both* `default-compile` and `default-testCompile`. The pom registers three processors — Lombok, `lombok-mapstruct-binding` (0.2.0) and `mapstruct-processor`. Dropping one makes generation fail silently or yield empty mappers.
+
+## Naming: full names for injected collaborators
+
+A field injected through the constructor is named after its type, unabbreviated: `limitService`, `expenseLimitRepository`, `currencyRateRepository`, `ratesClient`. Never `limits`, `rates`, `clients`, `categories`.
+
+The rule is about the reader, not about taste: `this.limits.install(...)` says "some collection of limits", while `this.limitService.install(...)` says which collaborator and which layer owns it. It also stops the web layer from reading like a data layer. Applies to tests too.
+
+Where a record already carries the same name as the type, use a different local instead of shadowing (`var row`, `var stored`).
+
+## Lombok is expected, not optional
+
+Use it wherever it removes boilerplate without hiding behaviour: `@Getter` on entity fields, `@NoArgsConstructor(access = PROTECTED)` for JPA, `@RequiredArgsConstructor` for constructor injection, `@Slf4j` instead of `LoggerFactory.getLogger(...)` in every class.
+
+Records stay records — Lombok is for what records cannot express. Do not add `@Data` to an entity: it generates a `toString` that walks a lazy proxy, and an `equals`/`hashCode` that JPA does not want.
+
+## Exception handling: one handler, ProblemDetail everywhere
+
+- Exactly one `@RestControllerAdvice`, living in the `exception` package and extending `ResponseEntityExceptionHandler` (verified present in spring-webmvc 7.0.9, which Boot 4.0.8 pulls). Per-controller `@ExceptionHandler` methods are forbidden, and `@ResponseStatus` is not used alongside the handler.
+- **Name an exception after the failure, not after the dependency.** `ExternalServiceUnavailableException` carries a `service` name so the next integration reuses it; `RatesUnavailableException` pinned the name to rates and would have needed renaming the moment a second provider arrived. Reserve a distinct type for a genuinely distinct condition, such as `RateNotFoundException`.
+- **Never narrow a wire format to make it uniform.** `@JsonFormat(pattern = …)` on a DTO field looks like tidiness and is a contract change: the pattern `yyyy-MM-dd'T'HH:mm:ssXXX` rejects `2022-01-02T00:00Z`, which is perfectly good ISO 8601 and which the scenarios send. Document the accepted format with `@Schema(description = …, example = …)` instead and let Jackson keep its standard leniency.
+- **Never write a response body from an interceptor or a filter.** They have no message converters, and serialising a `ProblemDetail` there produces a body that differs from the handler's. Throw a domain exception and let `GlobalExceptionHandler` render it — the rate limiter does exactly this with `RateLimitExceededException`, which is also why it extends `DomainException`.
+- Every error leaves the API as `ProblemDetail` (RFC 9457): `type` URN, `title`, `status`, `detail`, `instance`. Bean Validation failures add the field-level violations.
+- Domain exceptions live in the `exception` package. The **handler** decides the HTTP status — services must not import `HttpStatus`, construct a `ProblemDetail`, or return `ResponseEntity`.
+- No `try/catch` around external HTTP calls in services. The rates-client adapter turns transport failures into a domain exception; the retry/timeout strategy lives in `HttpRatesClient` and is described in `README.md`.
+- **Never hardcode the ledger currency.** `USD` appears in the specification, not in the code: `config/LedgerPolicy` carries it (`app.ledger.currency-code`) together with `amountScale` (`app.ledger.amount-scale`), and `LedgerPolicy.round(...)` is the one place an amount is rounded. Reintroducing a `LEDGER_CURRENCY` constant — in a service, or worse in `domain/ExchangeRate` — undoes the whole point. The same goes for `USD` in test stubs: `BddInfrastructureConfiguration` reads `LedgerPolicy` for exactly that reason.
+- **`LedgerPolicy` validates its own binding.** The code is checked against `^[A-Z]{3}$` in the compact constructor, so a typo in a property fails at startup instead of surfacing later as an empty currency lookup.
+
+## Static analysis is not optional
+
+- **SpotBugs** runs with `effort=Max`, `threshold=Medium`, bound to the `verify` phase. When it fires on concurrency, locking or null handling — the areas the spec grades on — fix the code. Do not add `@SuppressFBWarnings` or loosen the threshold.
+- **Spotless** enforces the Spring Java Format, on `src/**/*.java` plus `src/**/*.yml` and `*.properties`. Reformat with `./scripts/ci.sh --fix` or `./mvnw spotless:apply`, never by disabling the check. The Eclipse config is loaded from the classpath (`io/spring/javaformat/formatter/eclipse/formatter.prefs`), which is why `spring-javaformat-formatter` is a **dependency of the plugin**, not of the project. Changing that placement breaks the formatter with a confusing "Unable to locate file with path" error.
+- **ArchUnit** (`ArchitectureTest`) enforces the conventions below in milliseconds, so it runs on every commit. Beyond the layering rules it also asserts: `@Mapper` types are interfaces, `@RestControllerAdvice` lives in `..exception..`, `@Component` beans have no mutable instance fields, and — see the next point — that beans are `final`.
+- **Two ArchUnit rules bracket `final`, and they are opposites.** `transactionalBeansMustRemainProxyable` forbids it where something proxies the bean; `beansMustBeFinalUnlessSomethingProxiesThem` requires it everywhere else, exempting `@Transactional`, `@Cacheable` and `@Async` and classes named `*Impl` (MapStruct generates those, and their finality is not ours). **Six classes are therefore intentionally not final**: `ExchangeRateService`, `LimitService`, `TransactionService`, `ReportingService`, `ScheduledRatesFetcher`, `WeeklyCurrencyImport`. CGLIB cannot subclass a final class — verified, `IllegalArgumentException: Cannot subclass final class` — so marking one final does not fail the build, it silently removes the transactions. Note ArchUnit 1.5.1 has `beFinal()` only on *fields*: for classes it is `haveModifier(JavaModifier.FINAL)`, and `should(notHaveModifier(FINAL))` reads as the opposite of what it does.
+- **ArchUnit 1.5.1 has no `haveMethodsAnnotatedWith`.** Proxied beans are recognised by an annotation on a *method*, so `ArchitectureTest` carries its own `DescribedPredicate` over `getAllMethods()`. Add a new proxy-requiring annotation to `needsAProxy()`, or the rule will start rejecting beans that legitimately need one.
+- **The rules do not check themselves, and that is accepted.** There are no deliberately broken fixtures: every one of them caused more trouble than it caught, and they cost a whole package that had to be kept outside the component-scanned tree. ArchUnit's own default is strict — an empty `should` fails — and `src/test/resources/archunit.properties` relaxes it to `failOnEmptyShould=false`, which was needed while the layers did not exist and no longer is. **Deleting that file would make a typo'd rule fail instead of passing silently**, which is the more valuable of the two protections; the file survives only because nobody has decided to remove it.
+- Read a new rule twice before trusting it. A condition inverted in the wrong direction still passes on healthy code, because the wrong direction is usually the one nothing violates.
+
+## Boot 4 dependency naming
+
+This is not Boot 3. `spring-boot-starter-web`, `-test`, `-data-jpa-test` etc. no longer exist under the old names — the pom uses `spring-boot-starter-webmvc`, `-webmvc-test`, `-data-jpa-test`, `-data-redis-test`, `-flyway-test`, `-validation-test`, `-actuator-test`, and there is **no** `spring-boot-starter-test` aggregate. Copy the existing coordinates when adding dependencies. Mockito and AssertJ come in transitively with the `*-test` starters.
+
+**MapStruct, WireMock, Spotless, SpotBugs, ArchUnit, resilience4j, Cucumber and springdoc are not managed by the Boot parent**, so their versions live in `<properties>` with a comment — except springdoc, which pins `3.1.0` inline. If a version is missing, the build breaks on the next Boot upgrade; keep the pin. Note that `spotbugs-maven-plugin` and `spotbugs-annotations` use different version schemes (`4.10.4.1` vs `4.10.4`), which is why they have separate properties.
+
+`cucumber.version` is pinned because **Cucumber 8.0.4 is built against Spring 7.0.9**, which is exactly what the Boot 4.0.8 parent pulls, and it resolves JUnit Platform 6.0.3 — the version Boot 4 manages. Do not drop it to a 7.x line: `cucumber-spring` 7.x targets an older Spring and would break the `@CucumberContextConfiguration` wiring.
+
+`wiremock-standalone` is declared but no test uses it: the end-to-end suite stubs the provider with a bean, so no test needs an extra HTTP stub server. Do not add WireMock usage without removing that decision first.
+
+## Testing pitfalls
+
+- **Surefire only.** No `maven-failsafe-plugin` is configured. A class named `*IT` will never run under `./mvnw verify` — which the spec requires for the end-to-end test. Name integration tests `*Tests` or `*Test`.
+- **Testcontainers is required for most tests.** `FinancialTransactionsApplicationTests` is a full `@SpringBootTest` that boots Postgres and Redis; there are no embedded-database or mock alternatives, so `./mvnw test` cannot run without a working Docker daemon.
+- Every `@SpringBootTest` that needs infrastructure must `@Import(TestcontainersConfiguration.class)` to get the `@ServiceConnection` beans. Redis is a raw `GenericContainer` with `@ServiceConnection(name = "redis")`.
+- **Testcontainers image tags are pinned to `postgres:16` and `redis:7`.** Do not switch them to `:latest`. Those tags are not cached on this machine and Docker Hub pulls stall with "Docker image pull has not made progress in 30s", which makes `contextLoads` hang for minutes before it can even start. If a test needs a new image, pre-pull it first and pin an exact tag.
+- `TestFinancialTransactionsApplication` exists purely as a dev-time entry point that starts the containers and then runs the app; it is not a test.
+- **Inject through the constructor, in tests too.** A `@SpringBootTest` uses an explicit constructor with final parameters, not `@Autowired` fields: field injection hides the dependencies from the class declaration, and a test that reads as a list of beans tells you nothing about what the scenario actually needs.
+- **Use AssertJ `SoftAssertions` wherever a test makes more than one independent claim.** A hard `assertThat` stops at the first failure, so a test that checks the row count, the total and the flag count reports only the row count — and the interesting one, the flag count, is exactly the thing a missing row lock breaks. Keep hard asserts for the one claim that a failure makes the rest meaningless.
+- **Inject `java.time.Clock`, never `Instant.now()` / `LocalDate.now()`.** The flag logic depends on the current time; tests must be able to "move the clock" to reproduce the truth tables. `SettableClock` in the test sources is the substitute, and it is the only way to place an event in time — a scenario that needs a limit installed on a specific date sets the clock rather than reaching into a repository. This is how the backdated-transaction bug stayed hidden: the early scenarios all moved the clock to the installation dates, so the real case (a transaction older than anything the service knew) was never exercised until the backdated scenario was added.
+- The quota features override the numbers through `@TestPropertySource` on `QuotaFeatureContext` rather than exercising the production ones: a 60-token bucket refilling 10 per second cannot be exhausted deterministically, and a quota that is never exhausted is a quota that is never verified.
+- `features/service/currency_contract.feature` is the place for anything about the currency lookup, including "the schema refuses it".
+
+## BDD: the Cucumber layer
+
+`src/test/resources/features/**` holds executable specifications written in Gherkin. They run on the JUnit Platform engine, so `./mvnw verify` picks them up with no extra plugin, and `./mvnw test -Dtest=ApiFeatureTest` runs one suite.
+
+Cucumber 8 is a **major version with two traps that cost real time**, and both fail at compile time with no useful message:
+
+- **`@Given`/`@When`/`@Then` live in `io.cucumber.java.en`, not `io.cucumber.java`.** Gherkin 42 localised the keywords, so the English annotations moved into a per-language package. `io.cucumber.java.Given` does not exist.
+- **There is no `{boolean}` parameter type.** The truth tables need one, and there is no built-in to reach for. Amounts use `{word}` or `{string}` and are converted with `new BigDecimal(...)`.
+
+More Gherkin 42 behaviour worth knowing before writing a feature:
+
+- **Quoted cells in an `Examples` table are not unquoted.** `| "0" |` reaches the step as `""0""`, so it matches nothing. Values that feed a `{string}` parameter must be quoted; values feeding a `{word}` parameter must not.
+- **`(s)` is not an optional-group syntax.** `"{int} transaction(s) is stored"` matches only the literal text with `(s)`. Write a second annotation on the same method for the singular case, or pick one wording.
+- **An empty cell matches no parameter type at all**, so `| effective |` with a blank reports an *undefined step* rather than the null the code returns. Spell the case out: `| none |`.
+- **A scenario cannot observe a throw.** A `When` step that posts an invalid request fails the scenario as an error instead of passing it. Provoke the refusal inside a `Then` step with `assertThatThrownBy` — see `a transaction in {string} for {string} USD is refused as not found`.
+- **Amounts are `{word}`, not `{double}`.** `999.99 + 0.01` is not 1000 in binary floating point, and the truth-table row that depends on that being exactly 1000 is precisely the row a `double` parameter silently breaks.
+- **A `{word}` parameter next to another one is a trap.** `a transaction of {string} {word} happened on {string}` also matches `a transaction of "100" USD happened on "2022-01-05"`, and Cucumber reports that as *ambiguous* rather than preferring one definition. Give each shape a distinct wording.
+- **An empty value cannot be expressed in a table cell.** Gherkin passes a quoted cell through with its quotes, so `| "" |` arrives at the step as `""""`. Give an empty or absent value a step of its own.
+
+### Four runners, four contexts
+
+| Runner | Features | Context |
+|---|---|---|
+| `bdd/LimitFlagRuleFeatureTest` | `features/rule` | `@ContextConfiguration`, no Boot, no database — runs in ~200 ms |
+| `bdd/service/ServiceFeatureTest` | `features/service` | `@SpringBootTest` + Testcontainers |
+| `bdd/api/ApiFeatureTest` | `features/api` | `RANDOM_PORT` + Testcontainers |
+| `bdd/quota/QuotaFeatureTest` | `features/quota` | `RANDOM_PORT` + a 3-token quota via `@TestPropertySource` |
+
+**One Cucumber run cannot carry two Spring contexts**, because `@CucumberContextConfiguration` is resolved once per run. That is why there are four runners rather than one, and why the quota suite is separate: the buckets live in a map inside the interceptor for the lifetime of the context, so sharing one context would let the API scenarios spend the quota the quota scenarios are trying to exhaust.
+
+- **Glue is pinned per runner** (`GLUE_PROPERTY_NAME` = the one subpackage it needs). Leaving it at the parent package makes every runner instantiate every step class, so a step needing beans the context lacks fails the suite on wiring rather than on behaviour.
+- **`@CucumberContextConfiguration` must not sit on a `@Component` or `@Configuration` class** — Cucumber registers glue classes itself and rejects a duplicate bean definition. Use `@ContextConfiguration`, `@SpringBootTest` or a plain class.
+- **Object factories are found by SPI, so `cucumber-spring` claims every run.** The pure rule suite therefore still gets an (empty) Spring context; that costs milliseconds, where a `@SpringBootTest` would start containers.
+- `@LocalServerPort` is unusable in a step class: it injects into a JUnit test instance, and a glue class is a Spring bean. Read `local.server.port` from the `Environment` instead.
+- Steps are package-private and constructor-injected like any other bean. Do not annotate them `@Component` — that is the duplicate-bean-definition case above.
+- **Glue may list several packages** (`bdd.api,bdd.store`). `bdd.store` holds the steps that read stored rows and are needed by both the service and the API suites; defining them twice would make the two copies drift.
+
+## Test technique: boundaries and equivalence classes
+
+The behaviour is specified in Gherkin, and the partition tables live in `Examples` blocks. Two techniques, used for different jobs:
+
+- **Equivalence partitioning** picks one representative per class of input. A wrong rule usually breaks a whole class at once, so one scenario per class is enough.
+- **Boundary value analysis** adds the edges: minimum, minimum−1, maximum, maximum+1, and the exact edge itself. Off-by-one bugs live only there, and equivalence partitioning cannot see them because both sides of the boundary are represented and both happen to work.
+
+Where each lives:
+
+| Feature | Technique applied |
+|---|---|
+| `api/request_validation` | EP and BVA on every field of the payload: `sum` (`@DecimalMin` inclusive=false, `@Digits(12,2)`), a ten-digit account, a three-letter currency, and the `occurred_at` CHECK |
+| `service/conversion_boundaries` | BVA on HALF_UP rounding at half a cent, the precision of multiply-then-round, the classes of a non-positive rate, and the rate lookup chain |
+| `rule/month_boundary` | BVA on the last and first instants of a month, plus the two offsets whose local date and UTC date disagree |
+| `rule/ledger_policy` | BVA on the shape of a currency code and on a scale that cannot be negative |
+
+**Bean Validation can only be tested through HTTP.** The annotations fire at the web boundary, so a scenario that calls the service directly proves nothing about them — that is why `request_validation` is an integration feature.
+
+**A valid boundary value must be checked in the database too.** A 201 only proves the request was accepted; `1 transactions are stored` and the amount on the row are what prove the value survived.
+
+### Three behaviours the boundary tests pinned down
+
+- **`DataIntegrityViolationException` is answered with 400** (`GlobalExceptionHandler`). These are CHECK, UNIQUE and FK rules that Bean Validation cannot express, and they are all caused by input reaching further than the annotations allow. Without the handler a `datetime` before 1990 came back as a 500, which reads like a server fault rather than a bad request.
+- **A body Jackson cannot read is answered with our own problem type.** Spring's default handling returns a `ProblemDetail` with no `type`, so it carried `about:blank` and missed every other field the handler fills in. `handleHttpMessageNotReadable` is overridden to keep one shape for one API.
+- **The rate is looked up for the first day of the month**, because `TransactionService` passes `occurredMonth` to the conversion rather than the transaction date. A rate stored for the 3rd is therefore *not* found by a transaction of the 5th. The conversion scenarios are dated accordingly, and two of them exist to pin the behaviour down.
+
+## Target architecture
+
+- Package root is `com.idfinance.financial_transactions` (underscore, not hyphen; the hyphenated artifact name is invalid Java).
+- Subpackages by layer: `controller` / `service` / `repository` / `entity` / `dto` / `mapper` / `exception` / `config`, plus `client` for the external provider adapters, `domain` for the pure logic, and `web` for the rate limiter.
+- Layering: Controller → Service → Repository. Controllers do no business logic, and services touch no `org.springframework.web..` or `jakarta.servlet..` type.
+- Two REST API groups: an ingestion API for transactions (bean-validated), and a client-facing API (set a new limit, list limits, list transactions that exceeded the limit, list currencies).
+- All errors return Spring `ProblemDetail` (RFC 9457).
+- Currency rates come from an external provider behind `RatesProvider` (`service` package, so the contract sits with the code that depends on it). The HTTP adapters live in `client`, one class per provider, and the service layer does not know they exist. `HttpRatesClient` is `@ConditionalOnProperty(name = "app.rates.base-url")`; `NoRatesProvider` is the fallback when no URL is configured, which is the default.
+- **`RatesProvider.name()` is configuration, not a constant.** The value lands in `currency_rate.source`, so a staging instance on a sandbox and production on a paid tier stay distinguishable in stored data; a hardcoded `"external"` would make every provider indistinguishable. Stubs in tests return their own name (`"stub"`).
+- Schema-first migrations: Flyway scripts in `src/main/resources/db/migration`. Right now there is exactly one, `V1__init.sql`. Schema changes go in a new versioned migration, never by hand-editing an applied one.
+- **A CHECK constraint cannot contain a subquery in PostgreSQL.** When a rule needs to consult another table, use a foreign key; do not reach for a trigger to work around it.
+- **A repository method is declared only when something calls it.** `JpaRepository` already supplies `findAll`, `findById`, `save` and `count`; anything else must have a caller today. Speculative query methods are untested code that rots.
+- Configuration only through properties and environment variables. No hardcoded URLs, credentials, quotas, timezone constants or currency codes.
+
+## Domain rules that are easy to get wrong
+
+- A limit applies only from its installation datetime forward; a new limit does not retroactively change the flag on earlier transactions.
+- Monthly boundaries are computed in **one** explicitly chosen timezone (`app.month-timezone`, UTC), documented in `README.md`. Transactions arrive with assorted offsets.
+- Default limit is **1000 USD** per category when none was set. Categories are exactly `product` and `service`, seeded in the migration.
+- Existing limits cannot be updated — only new ones can be added, and the new limit's datetime is always "now" (`POST /api/v1/limits` has no date field, which is what makes backdating impossible).
+- **The flag rule, verified against all 8 rows of the truth table:** `limit_exceeded = (sum of the month's transactions running total, including this one) > (the limit in effect on the transaction date)`. "In effect" means the latest limit with `created_at <= occurred_at`. In code: `runningTotal.compareTo(limit.getSum()) > 0`.
+- **An exactly-zero remaining balance is NOT exceeded.** On 12.01 the running total is 2000 against a limit of 2000, and `2000 > 2000` is false. (An earlier version of this file claimed the opposite; that was wrong.)
+- A new limit does **not** reset what was already spent: on 10.01 the remaining balance is 900 = 2000 − 1100, so transactions predating the new limit still count toward the month's total.
+- The `Остаток` column of the second case in the spec is arithmetically wrong (it says −200 where 400 − 900 = −500). The flag column is consistent with the rule above. Trust the rule, not that column.
+- Concurrent transaction posts for the same client must not both observe the same remaining balance. The concurrent-posts scenario in `features/service/limit_flag_scenario.feature` verifies this, and it is a real check rather than a formality: with the row lock removed it reports 1 flagged transaction instead of 2, because two threads read the same running total. The lock is `ExpenseLimitRepository.lockEffectiveOn` (a `@Lock(PESSIMISTIC_WRITE)` query, `order by createdAt desc, id desc`, first row wins), and the balance is never computed outside the transaction boundary.
+- **Do not "simplify" the default-limit creation into a read-then-write.** `createDefaultIfAbsent` is a native `insert … on conflict do nothing` relying on the partial unique index `ux_expense_limit_default`. A Java-side `exists()` check before inserting lets two concurrent first transactions both create a limit.
+- The rate is resolved **before** the lock is taken: an external call takes seconds, and holding a row lock across it would block every other transaction of the client.
+
+## Where the money logic lives
+
+- **`domain/LimitFlagRule`** is the flag rule as a pure function, and `features/rule/limit_flag_rule.feature` checks it against every row of the truth table in milliseconds without a database. Change the rule there, never inline in a service.
+- **`domain/MonthBoundary`** is the only place a timestamp becomes a month. Boundaries use `app.month-timezone` (UTC), never the offset the sender happened to use. The month is also stored on the row as `occurred_month`, so reporting never recomputes it.
+- **`service/TransactionService.applyFlag`** is where the lock and the running total meet. The three steps — ensure the limit exists, lock it, read the total — are in that order for a reason: the first exists so that there is something to lock.
+- **A transaction stores the limit its flag was computed against**, in `expense_transaction.limit_id`. Resolving it by date at query time would report the wrong limit for past transactions the moment a new one is installed, and `features/api/client_api.feature` asserts exactly that.
+- **`assignFlag(Long, Boolean)` rejects nulls.** A null there would set `flag_calculated = true` with a missing half, which is exactly the state `ck_expense_transaction_flag_state` forbids; there is `markFlagUncalculated()` for the honest version of that case.
+- **`ledger_sum` and `limit_exceeded` are nullable on purpose**, together with `flag_calculated`. The column is named for the ledger currency, not for USD: it stores `sum × close` in whatever `app.ledger.currency-code` says, and a name that named a currency would quietly start lying the day the ledger moves. Likewise `Conversion.sumInLedger`, `sumInLedgerForMonth` and the `sumInLedger` field on both DTOs — the JSON field names are ours, the spec fixes only `limit_sum`, `limit_datetime` and `limit_currency_shortname`. A transaction in a currency with no rate is stored rather than dropped, and its flag stays explicitly uncalculated instead of being invented as `false`. A CHECK enforces that `flag_calculated and limit_exceeded is null` is impossible.
+- Installing a limit **appends**. A client may install as many limits as they like for the same category — that is how case 1 raises the limit from 1000 to 2000 USD on 10 January. Only *updating* an existing limit is forbidden, so there is deliberately no "limit already exists" error.
+- **The automatic 1000 USD fallback is dated at the epoch** (`to_timestamp(0)`), not at "now". A transaction can arrive dated before the service ever heard of the client — the specification's own tables do exactly this — and "now" as the installation date would leave that transaction with no limit to compare against. the backdated scenario in `features/service/limit_flag_scenario.feature` covers it; the first implementation stamped it with the current time and 500 on every backdated request.
+- Because of that epoch date, `ReportingService` reports `limitDatetime` as **null** for the automatic fallback. Telling a client 1000 USD was installed on 1 January 1970 would be worse than saying nothing.
+
+## Currencies
+
+- **The currency code is a verified reference, not a string.** `expense_transaction.currency_id` and `expense_limit.currency_id` are foreign keys to the `currency` lookup, and `currency_rate.base_currency` references `currency(code)`. Never store a raw code in a new column.
+- **The schema refuses a lowercase code.** `ck_currency_code_uppercase` and `ck_currency_code_shape` make `kzt` impossible to insert, so a typo cannot become a second currency. The currency-contract feature checks that, and checks that the service resolves a lower-case code from a request to the seeded row rather than storing it.
+- **The lookup is seeded in `V1__init.sql`** with the active ISO 4217 codes. `WeeklyCurrencyImport` adds codes that appear later; it runs weekly, not daily, because new codes are rare and the endpoint is paid. A transaction in an unknown code is refused with 404 until the next sweep — that is intended, not an oversight.
+- **The currencies swept daily live in the `currency_pair` table, not in `application.yml`.** An operator must be able to add or retire one without a release, and every poll costs money, so what is kept warm is an operational decision rather than a property of the code. `currency_pair.active` drives it; the seed is `KZT` and `RUB`, the bases of the pairs п.3 asks for. `AppProperties` has **no** pairs field any more: adding one back is a regression, not a convenience.
+- **`currency_pair` has no quote column, and never had one worth having.** The quote is `LedgerPolicy.currencyCode()` — a single value — and `currency_rate` stores rates without a quote because it is implied. A stored copy would be a second source of truth that can disagree with the configuration, and the only way to reconcile it is a code-level check on every sweep, which is exactly the `ScheduledRatesFetcher` comparison that was removed for that reason. **Do not add `quote_currency` back.** Being absent from the table is not a rejection: an unlisted currency is accepted and fetched on demand.
+- **`ck_currency_pair_quote_usd` is gone for a second reason.** A CHECK cannot read a property, so pinning the quote in the schema would mean re-editing an applied migration every time the ledger moves. It went when the column went.
+- That subset is about which rates are pre-fetched, **not** which currencies are accepted: a transaction in a currency outside it is still stored, with `flag_calculated = false` when no rate exists.
+- Conversion is `ledger_sum = sum × close`, where `close` is units of the ledger currency per one unit of the transaction currency. Multiply first, round once with `HALF_UP` at `app.ledger.amount-scale`: rounding the rate first destroys the only precision the conversion has.
+- Lookup order in `ExchangeRateService`: the exact day (`close`, falling back to `previous_close` on weekends and holidays), then the most recent rate not later than that day (a Monday close may not be published when the transaction arrives on Tuesday), then one external call. All three failing means the transaction is stored unflagged, not rejected.
+- Only `base = transaction currency` is stored; the quote is always USD and has no column. The inverse pair is derived by division, and persisting it would let two rows drift apart.
+
+## Accounts
+
+- `account_from` is a `varchar(10)` with a digit CHECK, and `account_to` likewise. **There is no account table on purpose.** The specification says exactly one thing about accounts — «строка из 10 цифр» — which describes a field format, not an entity. Normalising accounts would need facts about them (owner, account currency, status) that nobody has specified. Add a table the day something actually needs it, not before.
+
+## Web layer
+
+- **Every handler carries `@Operation`** with a summary and a description that says something the method name does not. `@ApiResponse` documents the non-2xx outcomes, and the description carries the part a reader would otherwise have to guess: which limit a row reports, why a flag may be absent, which date the service chose. Docs are served at `/swagger-ui.html` via `springdoc-openapi-starter-webmvc-ui`.
+- **`@RateLimited` marks an endpoint as limited; the numbers live under `app.rate-limits`.** The annotation names a block (`quota = "ingestion"`), and its own values are only a fallback so a newly limited endpoint is never silently unlimited. A configured block always wins over the annotation defaults.
+- **The limiter is resilience4j's `RateLimiter` core API, not `@RateLimiter`.** The annotation is an AOP aspect that builds *one limiter per method*, which is a per-method quota, and the quota here is per calling address. `RateLimitInterceptor` builds and caches limiters in a map instead. Same reason for `Retry.of(...)` in `HttpRatesClient` rather than `@Retry`: neither annotation can key by anything but the method, and the Spring starter would pull AOP in for no gain.
+- **Quota properties are named in the limiter's vocabulary** — `limit-for-period` and `limit-refresh-period`, not a token bucket's `capacity` and `refill-tokens`. The old names also described a token bucket, and a limiter that grants N permits per period is a slightly different policy; naming it the way it is enforced keeps the configuration and the code telling the same story.
+- **The limiter is per calling address (`ip=` + `getRemoteAddr()`), not per account.** The account travels in the JSON body and an interceptor runs before the body is readable; `getParameter` does not see a body, consuming the stream would leave nothing to parse, and caching it does not help because the cache fills as the controller reads. A per-account quota needs a filter that buffers the body first or an account header — a deliberate change, not something to smuggle into the interceptor.
+- Limiters are in memory, so a horizontal scale-out multiplies the effective quota by the instance count. That is right for shedding load per node and wrong for a global cap; do not present it as either.
+
+## Boot 4 gotchas found the hard way
+
+- **Jackson 3 for databind (`tools.jackson.databind`), but annotations stay on `com.fasterxml.jackson.annotation`.** The DTOs use `@JsonFormat`/`@JsonProperty` from the old package name; test code that injects an `ObjectMapper` must import `tools.jackson.databind.ObjectMapper`.
+- **No `RestClient.Builder` bean is contributed.** Build it yourself; `HttpRatesClient` constructs one, and `BddInfrastructureConfiguration` declares one for the HTTP scenarios.
+- **`TestRestTemplate` moved to `org.springframework.boot.resttestclient`,** and it is not auto-configured into a `@SpringBootTest`. The end-to-end scenarios use `RestClient` against the random port instead, which the specification explicitly allows.
+- **`ResponseEntityExceptionHandler` signatures changed.** `handleMethodArgumentNotValid` is now `(exception, HttpHeaders, HttpStatusCode, WebRequest)` returning `ResponseEntity<Object>`. The old three-argument form silently stops overriding anything.
+- A `@RestClient` request without an explicit `Content-Type: application/json` is answered **415** before validation runs, which would make any assertion about validation meaningless.
+- A modifying native `@Query` needs **`@Modifying`**; without it Hibernate complains that the statement returned no results. `createDefaultIfAbsent` also needs `clearAutomatically`/`flushAutomatically` so the inserted row is visible to the lock that follows.
+
+## Runtime: the image, and what runs where
+
+- **The image is `eclipse-temurin`, unmodified.** A trimmed `jlink` runtime on a distroless base was tried and reverted: it works and it saves about a third of the pulled size, but it costs a module list that is only correct until the next dependency reaches further, and a wrong entry fails on the first run rather than at the build. That trade was not worth it here.
+- **`JAVA_TOOL_OPTIONS` carries the JVM diagnostics**, because the JVM reads it itself and that is how a deployment overrides flags without a rebuild. It sets `-XX:+HeapDumpOnOutOfMemoryError -XX:+ExitOnOutOfMemoryError -XX:HeapDumpPath=/app/dumps`. **There is no flag that dumps the heap on a JVM crash** — HotSpot has no such facility, and a native crash is diagnosed from the `hs_err` log that `-XX:ErrorFile` points at the same directory. A dump is as large as the heap and holds credentials, so `/app/dumps` wants a volume.
+- **`curl` in the runtime stage is not optional**, because the `HEALTHCHECK` and the CI smoke check both use it and the temurin JRE ships no `wget`. Do not "tidy" the `apt-get` layer away.
+- **The actuator `heapdump` endpoint is off outside the `dev` profile.** It is a full dump of the process, so exposing it anywhere shared hands over whatever is in memory. `application-dev.yml` opens it; the default and `prod` do not.
+- **`spring.threads.virtual.enabled` is false in `prod`, on purpose.** Virtual threads on Tomcat move the bottleneck to HikariCP: request concurrency becomes unbounded while the pool stays at ten connections, so latency gets *worse* and the cause is invisible on a dashboard. `server.tomcat.threads.max` also stops meaning anything, `jstack` stops showing request threads, and a slow request is no longer killed by `connectionTimeout`. The daily sweep uses virtual threads regardless — that is where they pay off, with no shared pool involved.
+- **`ScheduledRatesFetcher` opens its transactions with `TransactionTemplate`, not `@Transactional`.** Its `refreshDaily` fans out across network calls, and a self-invoked transactional method is not proxied, so the annotation would silently not apply while still pinning a connection for the whole sweep. The parallel phase is fetching only; the results are written in one batch afterwards so a failure halfway cannot leave the table half refreshed.
+- **`refreshDaily` is enabled by `app.scheduling.enabled`, and the test contexts turn it off.** Otherwise the daily sweep and the weekly currency import are registered in every `@SpringBootTest`, and a test that happens to run at the right hour starts calling a paid external API.
+
+## CI/CD
+
+Two workflows, split by cost. The split is about *your* wait time, not a quota.
+
+| | Trigger | What runs |
+|---|---|---|
+| `ci.yml` | every push to `master`, every PR | composite action → `./mvnw -B verify`: compile, tests, SpotBugs, ArchUnit, jar artifact |
+| `quality.yml` | `workflow_dispatch`, nightly cron (`17 3 * * *`), push to `master` | Spotless check, SpotBugs standalone, Docker image build + real startup smoke check |
+
+- `.github/actions/ci/action.yml` is the composite action holding the shared steps. `scripts/ci.sh` runs the same Maven commands plus a Spotless check, so a green `./scripts/ci.sh` is a green `ci.yml` — with one check more, never fewer.
+- Run the slow checks on demand from the Actions tab rather than waiting on a commit. Do not add heavy jobs to `ci.yml` to "improve quality".
+- The `image` job packages the jar on the runner first (`-DskipTests package`) so the Docker build does not re-run Maven, then starts `postgres:16` and `redis:7` on a Docker network, runs the image and polls `/actuator/health` with `curl`. The image installs `curl` for exactly this reason — the temurin JRE has no `wget`, so the original `wget`-based check failed with "executable file not found".
+- The `Dockerfile` is a two-stage build; locally `docker build -t financial-transactions:local .` takes several minutes the first time.
+- If a run sits queued with no log output, check `githubstatus.com` before suspecting the code.
+
+## Repo housekeeping
+
+`pom.xml` uses **tab** indentation (Initializr default); match it. `HELP.md` is listed in `.gitignore`, so it is never committed — do not rely on it as documentation.
+
+`.gitignore` ignores `.env*` and then re-admits `.env.example` with a negation, so a future `.env.production` is covered automatically while the template stays tracked. **`.env.example` must never contain real credentials.**
+
+Known gaps: no `.agents/skills/<name>/SKILL.md` (Agent Skills format; symlink `.claude/skills` → `.agents/skills`), no Redis rate-limit cache (optional in the spec), a single rates provider with no failover, and the repository still has no commits and no remote.
+
+**The missing commits cost real work once already.** Every file was untracked, so an `rm -rf src/test/java/com/idfinance` — meant for a fixtures package inside that tree — took the twenty-one test sources with it and there was nothing to restore from. They came back by decompiling `target/test-classes`, which recovered the logic and lost the comments, and the surviving `features/*.feature` files are what made the behaviour verifiable afterwards. Make the first commit before the second bad command.
+
+`.mcp.json` sits at the repository root (uncommitted like everything else) and wires two servers: **Context7** for library documentation, and **postgres-mcp** for read-only SQL against the development database. The PostgreSQL server is configured with `default_transaction_read_only=on` and `statement_timeout=5000` on purpose — a writable agent connection to a development database is how a table disappears, and the guard belongs in the config rather than in the instructions.
