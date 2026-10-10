@@ -102,8 +102,44 @@ jobs:
           docker network rm financial-smoke || true
           exit 1
 
+      # The OpenAPI document as a build artifact, so a client has the contract without this
+      # server exposing /v3/api-docs. A second container on purpose: the smoke check above runs
+      # the profile the deployment actually uses, where api-docs is off, and turning it on there
+      # would test a configuration nobody deploys. This one is the `dev` profile on another port.
+      #
+      # It needs the same databases as the app, and those are still running from the step above.
+      - name: Generate the API contract
+        run: |
+          docker run -d --name docs-app --network financial-smoke -p 8081:8080 \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://smoke-db:5432/financial \
+            -e SPRING_DATASOURCE_USERNAME=financial \
+            -e SPRING_DATASOURCE_PASSWORD=financial \
+            -e SPRING_DATA_REDIS_HOST=smoke-redis \
+            -e SPRING_PROFILES_ACTIVE=dev \
+            -e DEPLOYMENT_ENVIRONMENT=ci \
+            financial-transactions:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8081/v3/api-docs | jq . > openapi.json && break
+            sleep 3
+          done
+          if [ ! -s openapi.json ]; then
+            echo "The contract was not produced; container logs follow."
+            docker logs docs-app
+            exit 1
+          fi
+          jq -r '.paths | keys[]' openapi.json | sed 's/^/  /'
+          docker rm -f docs-app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi-contract
+          path: openapi.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Clean up on failure
         if: failure()
         run: |
+          docker rm -f docs-app || true
           docker rm -f smoke-app smoke-db smoke-redis || true
           docker network rm financial-smoke || true

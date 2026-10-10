@@ -58,8 +58,9 @@ spring:
 springdoc:
   # Off here and on everywhere else, because springdoc warns about it on every production start and is
   # right to: /v3/api-docs describes the whole internal surface, including the paths a client never sees.
-  # The specification asks for the API to be documented, which it is — open the UI in the `dev` profile,
-  # or set this back to true where publishing it is a deliberate decision rather than a default.
+  # The specification asks for the API to be documented, which it is: quality.yml generates the same
+  # document as a build artifact from a container run in the `dev` profile, so a client gets the
+  # contract without this server exposing anything.
   api-docs:
     enabled: false
   swagger-ui:
