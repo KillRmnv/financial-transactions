@@ -14,6 +14,7 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.conditions.ArchConditions;
 import java.lang.annotation.Annotation;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.cache.annotation.Cacheable;
@@ -67,10 +68,19 @@ class ArchitectureTest {
 	/**
 	 * The annotations that make Spring wrap a bean in a proxy, which is exactly the
 	 * set of reasons a class may legitimately not be final.
+	 *
+	 * <p>
+	 * {@code @SchedulerLock} belongs here for the same reason as the other three:
+	 * it is an AOP aspect, so a final method on a final class cannot be advised and
+	 * CGLIB cannot subclass the bean. That annotation cost one debugging session
+	 * twice — once on {@code WeeklyCurrencyImport} and once on
+	 * {@code ScheduledRatesFetcher} — and both times the symptom was a context that
+	 * would not start, taking every scenario in the suite with it rather than the
+	 * one that mattered.
 	 */
 	private static DescribedPredicate<JavaClass> needsAProxy() {
 		return haveProxiedMethod(Transactional.class).or(haveProxiedMethod(Cacheable.class))
-				.or(haveProxiedMethod(Async.class));
+				.or(haveProxiedMethod(Async.class)).or(haveProxiedMethod(SchedulerLock.class));
 	}
 
 	/**
@@ -171,8 +181,10 @@ class ArchitectureTest {
 	 */
 	@Test
 	void transactionalBeansMustRemainProxyable() {
-		ArchRule rule = noClasses().that(haveProxiedMethod(Transactional.class)).should(ArchConditions.be(isFinal()))
-				.because("CGLIB cannot subclass a final class, so the bean would silently lose its transactions");
+		ArchRule rule = noClasses().that(needsAProxy()).should(ArchConditions.be(isFinal()))
+				.because("CGLIB cannot subclass a final class, so the bean would silently lose its "
+						+ "transactions, its cache, or its scheduler lock — and the context fails to start "
+						+ "with an AopConfigException naming only the class, not the annotation");
 		rule.check(classes);
 	}
 

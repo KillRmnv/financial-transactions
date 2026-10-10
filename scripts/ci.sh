@@ -2,12 +2,13 @@
 #
 # Local equivalent of .github/workflows/ci.yml.
 #
-# The Maven steps below are the same ones the CI composite action runs, so a green run
-# here means a green run there. Anything that needs the real runner (static analysis,
-# image build) lives in quality.yml and is deliberately not part of this script.
+# The command below is the same one the CI composite action runs, so a green run here
+# means a green run there: compile, tests, format check and static analysis, because
+# Spotless and SpotBugs are bound to the verify phase. Only the image build needs the
+# real runner, and it lives in quality.yml.
 #
 # Usage:
-#   ./scripts/ci.sh              # format check + tests
+#   ./scripts/ci.sh              # everything
 #   ./scripts/ci.sh --fix        # reformat the code instead of failing
 #   ./scripts/ci.sh -Dtest=Foo   # pass extra arguments through to Maven
 
@@ -38,14 +39,15 @@ done
 
 echo "==> JDK: $(java -version 2>&1 | head -1)"
 
-echo "==> Format check"
-./mvnw "${MAVEN_ARGS[@]}" spotless:check
-
-echo "==> Build and test"
+# Spotless and SpotBugs are bound to the verify phase in the pom, so the single
+# command below is the whole check: compile, tests, format, static analysis. Running
+# spotless:check separately here would only start a second Maven for a goal the build
+# performs anyway.
+echo "==> Build, test, format check and static analysis"
 ./mvnw "${MAVEN_ARGS[@]}" verify
 
 echo
-echo "CI steps passed locally. Static analysis and the image build are not part of this"
-echo "script on purpose - run them when you need them:"
-echo "  ./mvnw spotbugs:check spotless:check"
+echo "CI steps passed locally. The image build is not part of this script on purpose -"
+echo "run it when you need it:"
+echo "  ./mvnw spotbugs:check spotless:check   # standalone, without the tests"
 echo "  docker build -t financial-transactions:local ."

@@ -1,10 +1,15 @@
 name: CI
 
-# Fast path: runs on every push and every pull request. Kept deliberately small so it
-# stays in the low minutes range; expensive checks live in quality.yml.
+# Fast path: runs on every push to any branch and on every pull request, so a feature
+# branch is checked before it is ever merged rather than only afterwards. Kept
+# deliberately small so it stays in the low minutes range; expensive checks live in
+# quality.yml.
+#
+# `push:` with no branch filter is every branch. The concurrency group is keyed on the
+# ref, so pushing to a feature branch cancels that branch's earlier run and leaves a
+# master run alone.
 on:
   push:
-    branches: [master]
   pull_request:
   workflow_dispatch:
 

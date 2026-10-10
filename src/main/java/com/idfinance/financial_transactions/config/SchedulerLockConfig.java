@@ -1,10 +1,13 @@
 package com.idfinance.financial_transactions.config;
 
+import javax.sql.DataSource;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
  * Makes the daily sweep run on one instance rather than on every instance.
@@ -43,13 +46,29 @@ import org.springframework.context.annotation.Configuration;
 public final class SchedulerLockConfig {
 
 	/**
-	 * @param provider
-	 *            over the table {@code V2__shedlock.sql} creates; ShedLock owns its
-	 *            rows and its SQL
+	 * The table {@code V2__shedlock.sql} creates. Named here as well because
+	 * ShedLock's default is {@code shedlock} and a mismatch is a runtime error at
+	 * the first sweep rather than at startup.
+	 */
+	private static final String LOCK_TABLE = "shedlock";
+
+	/**
+	 * Built here rather than contributed by an auto-configuration: ShedLock ships
+	 * no {@code AutoConfiguration.imports}, so declaring the provider as a
+	 * parameter of another bean asks for something nothing creates. The failure is
+	 * {@code NoSuchBeanDefinitionException}, and it appears as a context that will
+	 * not start rather than as a missing lock.
+	 *
+	 * @param dataSource
+	 *            the same database the application uses; the lock table sits next
+	 *            to the data it protects
+	 * @param transactionManager
+	 *            so acquiring a lock runs inside a transaction — the lock row is
+	 *            written and read as one unit
 	 */
 	@Bean
-	public LockProvider lockProvider(JdbcTemplateLockProvider provider) {
-		return provider;
+	public LockProvider lockProvider(DataSource dataSource, PlatformTransactionManager transactionManager) {
+		return new JdbcTemplateLockProvider(new JdbcTemplate(dataSource), transactionManager, LOCK_TABLE);
 	}
 
 	/**

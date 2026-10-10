@@ -64,7 +64,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 @ConditionalOnProperty(name = "app.scheduling.enabled", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
-public final class ScheduledRatesFetcher {
+// Not final: refreshDaily carries @SchedulerLock, which is an AOP aspect, and
+// CGLIB cannot subclass a
+// final class. The failure is not a startup error — the class is made non-final
+// at build time — it is a
+// context that cannot start, which takes down every scenario in the suite
+// rather than one. The same
+// reasoning as WeeklyCurrencyImport, and ArchitectureTest does not catch it
+// because @SchedulerLock is not
+// one of the annotations needsAProxy() knows about.
+public class ScheduledRatesFetcher {
 
 	private final CurrencyPairRepository currencyPairRepository;
 

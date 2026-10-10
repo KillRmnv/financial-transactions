@@ -4,16 +4,18 @@ name: Quality
 #   - workflow_dispatch  run them on demand from the Actions tab
 #   - schedule           nightly catch regressions
 #   - push to master     once the code is actually merged
-# Pull requests never trigger this workflow; the fast ci.yml gate is enough there.
+# Pull requests never trigger this workflow; the fast ci.yml gate runs on every branch
+# and is enough there.
+#
+# No paths-ignore: a push touching only this file is exactly the one that has to prove
+# the image job still resolves its actions, and an earlier buildx typo sat here for a
+# whole push unnoticed because such a push triggered nothing.
 on:
   workflow_dispatch:
   schedule:
     - cron: '17 3 * * *'
   push:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - '.github/workflows/quality.yml'
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -23,25 +25,10 @@ permissions:
   contents: read
 
 jobs:
-  static-analysis:
-    name: Static analysis
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '25'
-          cache: maven
-
-      - name: Run SpotBugs
-        run: ./mvnw -B spotbugs:check
-
-      - name: Run Spotless
-        run: ./mvnw -B spotless:check
-
+  # There is deliberately no separate static-analysis job. SpotBugs and Spotless are
+  # both bound to the verify phase in the pom, so the single `./mvnw -B verify` that
+  # ci.yml already runs covers them. Running them again here duplicated the work on
+  # every push to master without checking anything the fast job had not.
   image:
     name: Build the Docker image
     runs-on: ubuntu-latest

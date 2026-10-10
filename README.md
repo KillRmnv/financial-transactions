@@ -518,16 +518,34 @@ details.
 conventions, the verified behaviour of the flag rule and the toolchain quirks discovered along
 the way.
 
-**Which MCP servers and why.** Two, configured in `.mcp.json`:
+**Which MCP servers and why.** Three, and they are split across two config files because two
+different agents read two different formats:
 
-- **Context7**, for library documentation. Boot 4 renamed enough of Spring's coordinates that
-  "the artifact I remember" is frequently wrong; looking the current one up costs less than
-  discovering it from a compile error.
-- **PostgreSQL**, against the development database, read-only. An agent that can read the schema
-  and the rows does not have to guess column names, and the connection carries
-  `default_transaction_read_only=on` and `statement_timeout=5000` in the URI rather than in these
-  instructions: a guard that lives in a prompt can be forgotten, and a writable agent connection
-  to a development database is how a table disappears.
+| Server | Where | Why |
+|---|---|---|
+| **Context7** | `opencode.json` (project) | library documentation. Boot 4 renamed enough of Spring's coordinates that "the artifact I remember" is frequently wrong, and looking the current one up costs less than discovering it from a compile error |
+| **PostgreSQL** | `~/.config/opencode/opencode.jsonc` (personal) | read-only SQL against the development database, so an agent reads the real schema instead of guessing column names |
+| **GitHub** | `~/.config/opencode/opencode.jsonc` (personal) | issues, pull requests and CI runs, which is also what makes publishing this repository possible |
+
+`.mcp.json` at the repository root holds the same two servers in **Claude Code's** format. It is kept
+because Claude Code is a different host reading a different file, not as an accident: OpenCode ignores
+it entirely, and `opencode mcp list` answering *No MCP servers configured* is how that was found.
+
+Two details that cost time, both recorded in `AGENTS.md`:
+
+- **`@crystaldba/postgres-mcp` no longer exists on npm.** The registry answers 404, and the failure
+  presents as a server that "exited with code 1" rather than as a missing package. The replacement is
+  `@contextflo/postgres-mcp`.
+- **The remote GitHub server needs Copilot.** `https://api.githubcopilot.com/mcp/` answers 403 to a
+  plain `gh` token — which works fine against `api.github.com`. The configured one is the local Docker
+  image, which takes the same token.
+
+The GitHub token is never written to a file: `config.fish` exports it from `gh auth token`, and both
+configs reference `{env:GITHUB_PERSONAL_ACCESS_TOKEN}`. **The server must see it in the environment at
+startup** or it silently falls back to a device-code flow that waits for a browser. The PostgreSQL
+connection carries `default_transaction_read_only=on` and `statement_timeout=5000` for the same reason
+the guard is in the config and not in the instructions: a writable agent connection to a development
+database is how a table disappears.
 
 **Where AI got it wrong, and how that was noticed.** Worth recording, because the failures are
 instructive:
