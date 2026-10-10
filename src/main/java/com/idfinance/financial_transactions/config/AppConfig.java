@@ -2,7 +2,6 @@ package com.idfinance.financial_transactions.config;
 
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.ZoneId;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -53,26 +52,15 @@ public final class AppConfig {
 	 * scheduler slot and a lock lease for good.
 	 */
 	/**
-	 * How long the rate phase of a batch of transactions may take.
-	 *
-	 * <p>
-	 * Larger than the provider's own timeouts, because a batch runs its calls
-	 * concurrently and the wait is for the slowest of them rather than for the sum
-	 * — but only just, since it exists to bound a provider that never answers.
+	 * @param properties
+	 *            supplies the provider's timeouts, from which both phases derive
+	 *            their bounds
 	 */
 	@Bean
-	Duration rateBatchTimeout(AppProperties properties) {
+	RateTimeouts.Rates rateTimeoutSettings(AppProperties properties) {
 		AppProperties.Rates rates = properties.rates();
-		Duration perAttempt = rates.connectTimeout().plus(rates.readTimeout());
-		return perAttempt.multipliedBy(Math.max(1, rates.attempts())).plusSeconds(10);
-	}
-
-	@Bean
-	Duration rateSweepTimeout(AppProperties properties) {
-		AppProperties.Rates rates = properties.rates();
-		Duration perAttempt = rates.connectTimeout().plus(rates.readTimeout());
-		Duration all = perAttempt.multipliedBy(Math.max(1, rates.attempts())).plus(rates.retryBackoff());
-		return all.plusSeconds(5);
+		return new RateTimeouts.Rates(rates.connectTimeout(), rates.readTimeout(), rates.attempts(),
+				rates.retryBackoff());
 	}
 
 }

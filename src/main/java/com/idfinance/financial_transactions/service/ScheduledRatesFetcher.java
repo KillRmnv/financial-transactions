@@ -1,6 +1,7 @@
 package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.config.LedgerPolicy;
+import com.idfinance.financial_transactions.config.RateTimeouts;
 import com.idfinance.financial_transactions.config.SchedulerLockConfig;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
@@ -101,7 +102,7 @@ public class ScheduledRatesFetcher {
 	 * the provider's own timeouts rather than guessed: three attempts with a pause
 	 * between them, and a margin for the retry.
 	 */
-	private final Duration sweepTimeout;
+	private final RateTimeouts rateTimeouts;
 
 	@Scheduled(cron = "0 0 ${app.scheduled-fetch-hour} * * *", zone = "${app.month-timezone}")
 	@SchedulerLock(name = SchedulerLockConfig.Names.DAILY_RATES, lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
@@ -179,7 +180,7 @@ public class ScheduledRatesFetcher {
 				// recalculated by the next sweep, which is the same bargain fetch() already
 				// makes on
 				// a provider error.
-				var result = await(task, this.sweepTimeout);
+				var result = await(task, this.rateTimeouts.sweep());
 				if (result != null) {
 					fetched.put(result.currencyCode(), result.rate());
 				}

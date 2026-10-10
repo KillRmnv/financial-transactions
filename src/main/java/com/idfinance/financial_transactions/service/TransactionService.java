@@ -1,6 +1,7 @@
 package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.config.LedgerPolicy;
+import com.idfinance.financial_transactions.config.RateTimeouts;
 import com.idfinance.financial_transactions.domain.MonthBoundary;
 import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.entity.Currency;
@@ -18,7 +19,6 @@ import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -100,7 +100,7 @@ public class TransactionService {
 	 * Bounding it is not about speed but about a provider that never answers, which
 	 * would otherwise hold the request thread indefinitely.
 	 */
-	private final Duration batchTimeout;
+	private final RateTimeouts rateTimeouts;
 
 	/**
 	 * Accepts one transaction.
@@ -184,7 +184,7 @@ public class TransactionService {
 					// flight; joining inside the submission loop would serialise precisely what
 					// this
 					// method exists to parallelise.
-					prepared.add(task.get(this.batchTimeout.toMillis(), TimeUnit.MILLISECONDS));
+					prepared.add(task.get(this.rateTimeouts.batch().toMillis(), TimeUnit.MILLISECONDS));
 				} catch (InterruptedException ex) {
 					Thread.currentThread().interrupt();
 					throw new IllegalStateException("The batch was interrupted while resolving rates", ex);
