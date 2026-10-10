@@ -109,6 +109,23 @@ class ApiSteps {
 				.as("installing the limit", new Object[0])).isEqualTo(HttpStatus.CREATED);
 	}
 
+	@Given(value = "a limit of {string} USD was installed on {string} for the category {string}")
+	void aLimitWasInstalledForCategory(String sum, String isoDate, String category) {
+		String previous = this.category;
+		this.category = category;
+		try {
+			aLimitWasInstalled(sum, isoDate);
+		} finally {
+			this.category = previous;
+		}
+	}
+
+	@Then("the {word} exceeded transaction is in the category {string}")
+	void theExceededTransactionIsInCategory(String ordinal, String category) {
+		Assertions.assertThat(rowAt(ordinal).get("expenseCategory").asText()).as("the category of the %s row", ordinal)
+				.isEqualTo(category);
+	}
+
 	@When(value = "a transaction of {string} USD happened on {string}")
 	void aTransactionHappened(String sum, String isoDate) {
 		this.postTransaction(sum, "USD", this.category, isoDate);
@@ -306,8 +323,79 @@ class ApiSteps {
 
 	@When("the limits of the account are requested")
 	void theLimitsAreRequested() {
-		this.response = exchange(this.client().get().uri("/api/v1/limits?account_from=" + this.accountFrom));
+		theLimitsOfAreRequested(null);
+	}
+
+	@When("the limits of the account are requested for the category {string}")
+	void theLimitsOfCategoryAreRequested(String category) {
+		theLimitsOfAreRequested(category);
+	}
+
+	/**
+	 * A named account rather than the one the steps have been talking about, so a
+	 * scenario about an account nothing has ever been posted for does not have to
+	 * post something to it first.
+	 */
+	@When("the limits of the account {string} are requested")
+	void theLimitsOfTheNamedAccountAreRequested(String account) {
+		String previous = this.accountFrom;
+		this.accountFrom = account;
+		try {
+			theLimitsOfAreRequested(null);
+		} finally {
+			this.accountFrom = previous;
+		}
+	}
+
+	/**
+	 * The same report with and without the category filter, so the two cannot drift
+	 * into different requests: a scenario comparing them is comparing the filter
+	 * and nothing else.
+	 */
+	private void theLimitsOfAreRequested(String category) {
+		String uri = "/api/v1/limits?account_from=" + this.accountFrom
+				+ ((category == null) ? "" : "&expense_category=" + category);
+		this.response = exchange(this.client().get().uri(uri));
 		this.responseBody = readBody();
+	}
+
+	@When("the exceeded transactions for the current month are requested")
+	void theExceededTransactionsForThisMonthAreRequested() {
+		theExceededTransactionsForThisMonth(null);
+	}
+
+	@When("the exceeded transactions for the current month are requested for the category {string}")
+	void theExceededTransactionsForThisMonth(String category) {
+		String uri = "/api/v1/limits/exceeded?account_from=" + this.accountFrom
+				+ ((category == null) ? "" : "&expense_category=" + category);
+		this.response = exchange(this.client().get().uri(uri));
+		this.responseBody = readBody();
+	}
+
+	@Then("the limit for {string} reports {string} of the limit")
+	void theLimitReportsItsAmount(String category, String limitSum) {
+		JsonNode row = limitRowFor(category);
+		Assertions.assertThat(row.get("limitSum").decimalValue()).as("the limit on %s", category)
+				.isEqualByComparingTo(new BigDecimal(limitSum));
+	}
+
+	/**
+	 * The row of the limits report for one category.
+	 *
+	 * <p>
+	 * The last match rather than the first, because installing a limit appends and
+	 * the report is ordered by installation date: a client that raised its limit
+	 * twice is asking about the one in effect, which is the newest.
+	 */
+	private JsonNode limitRowFor(String category) {
+		JsonNode row = null;
+		for (JsonNode candidate : this.responseBody) {
+			if (category.equals(candidate.get("expenseCategory").asText())) {
+				row = candidate;
+			}
+		}
+		Assertions.assertThat(row).as("a limit for the category %s", category).isNotNull();
+		return row;
 	}
 
 	@Then("the response holds {int} limits")
@@ -318,14 +406,7 @@ class ApiSteps {
 
 	@Then("the limit for {string} reports {string} spent and {string} remaining")
 	void theLimitReports(String category, String spent, String remaining) {
-		JsonNode row = null;
-		for (JsonNode candidate : this.responseBody) {
-			if (category.equals(candidate.get("expenseCategory").asText())) {
-				row = candidate;
-			}
-		}
-		Assertions.assertThat(row).as("a limit for the category %s", category).isNotNull();
-
+		JsonNode row = limitRowFor(category);
 		// spent and remaining come from one joined query now rather than a lookup per
 		// limit, so this is
 		// the assertion that would notice the aggregation being dropped or the join

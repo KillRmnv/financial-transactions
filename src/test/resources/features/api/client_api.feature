@@ -70,12 +70,70 @@ Feature: The client-facing API over HTTP
     And a transaction of "600" USD happened on "2022-01-03"
     When the limits of the account are requested
     Then the response is 200
-    And the response holds 1 limits
+    And the response holds 2 limits
     And the limit for "product" reports "1100" spent and "900" remaining
+    And the limit for "service" reports "0" spent and "1000" remaining
+
+  # The report is driven by the categories rather than by the rows, so a category nobody
+  # has spent on is still answered. Omitting it read as "no limit applies here", while
+  # the first transaction in that category would in fact be measured against the same
+  # standing 1000 USD — the omission and the absence were told apart by nobody.
+  Scenario: A category with nothing installed reports the standing default
+    Given the account "0000000460" and the category "product"
+    And a transaction of "400" USD happened on "2022-01-05"
+    When the limits of the account are requested
+    Then the response holds 2 limits
+    And the limit for "service" is the automatic fallback
+    And the limit for "service" reports "1000" of the limit
+    And the limit for "service" reports "0" spent and "1000" remaining
+
+  Scenario: An account nothing has ever been posted for still has both categories
+    When the limits of the account "0000000461" are requested
+    Then the response is 200
+    And the response holds 2 limits
+    And the limit for "product" is the automatic fallback
+    And the limit for "service" is the automatic fallback
+
+  # The filter is the same question asked about one category rather than both.
+  Scenario: A category can be asked for on its own
+    Given a limit of "2000" USD was installed on "2022-01-01"
+    And a transaction of "500" USD happened on "2022-01-02"
+    When the limits of the account are requested for the category "product"
+    Then the response is 200
+    And the response holds 1 limits
+    And the limit for "product" reports "500" spent and "1500" remaining
+
+  Scenario: Asking for one category that has no limit still answers with the default
+    Given a limit of "2000" USD was installed on "2022-01-01"
+    When the limits of the account are requested for the category "service"
+    Then the response holds 1 limits
+    And the limit for "service" is the automatic fallback
+
+  # An empty list would be the same answer as "no limit applies here", which is the one
+  # answer the specification forbids. The category is checked where the report is built,
+  # so it costs no round trip of its own.
+  Scenario: A category the lookup does not hold is refused by the limits report
+    When the limits of the account are requested for the category "gold"
+    Then the response is 404
+    And the response is a problem of type "not-found"
+
+  Scenario: A category the lookup does not hold is refused by the exceeded report
+    When the exceeded transactions for the current month are requested for the category "gold"
+    Then the response is 404
+    And the response is a problem of type "not-found"
 
   # An installed limit has a date; the standing 1000 USD fallback has none, because nothing
   # installed it. A null date on its own reads as "unknown", so the row says which of the two
   # it is.
+  Scenario: The exceeded report takes the same category filter
+    Given a limit of "1000" USD was installed on "2022-01-01" for the category "product"
+    And a limit of "1000" USD was installed on "2022-01-01" for the category "service"
+    And a transaction in the category "product" for "1500" USD happened on "2022-01-05"
+    And a transaction in the category "service" for "1500" USD happened on "2022-01-05"
+    When the exceeded transactions for the current month are requested for the category "service"
+    Then the response holds 1 exceeded transactions
+    And the 1st exceeded transaction is in the category "service"
+
   Scenario: An installed limit reports its installation date and is not the fallback
     Given the account "0000000123" and the category "product"
     And a limit of "1000" USD was installed on "2022-01-10"
