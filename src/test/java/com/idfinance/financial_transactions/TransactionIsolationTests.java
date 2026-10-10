@@ -233,11 +233,11 @@ class TransactionIsolationTests {
 	private void storeCommitted(String isoDate) {
 		this.jdbcTemplate.update("""
 				insert into expense_transaction
-				    (account_from, account_to, currency_id, category_id, sum, ledger_sum, occurred_at,
-				     occurred_month, flag_calculated, limit_exceeded, created_at)
+				    (account_from, account_to, currency_id, category_id, amount, ledger_sum, occurred_at,
+				     occurred_month, limit_exceeded, created_at)
 				values (?, ?, (select id from currency where code = 'USD'),
 				        (select id from expense_category where code = 'product'), 400, 400, ?::timestamptz,
-				        '2022-01-01', true, false, now())
+				        '2022-01-01', false, now())
 				""", ACCOUNT, COUNTERPART, java.sql.Timestamp.valueOf(LocalDate.parse(isoDate).atStartOfDay()));
 	}
 
@@ -247,15 +247,19 @@ class TransactionIsolationTests {
 	 * {@code blocking.executeUpdate} takes a statement and a statement cannot carry
 	 * the {@code ?} parameters — the same insert through {@code JdbcTemplate} is
 	 * used for the committed rows.
+	 *
+	 * <p>
+	 * {@code flag_calculated} is absent because the database derives it from
+	 * {@code limit_exceeded}; naming it here would be rejected outright.
 	 */
 	private String insert(String isoDate) {
 		return """
 				insert into expense_transaction
-				    (account_from, account_to, currency_id, category_id, sum, ledger_sum, occurred_at,
-				     occurred_month, flag_calculated, limit_exceeded, created_at)
+				    (account_from, account_to, currency_id, category_id, amount, ledger_sum, occurred_at,
+				     occurred_month, limit_exceeded, created_at)
 				values ('%s', '%s', (select id from currency where code = 'USD'),
 				        (select id from expense_category where code = 'product'), 400, 400, '%s'::timestamptz,
-				        '2022-01-01', true, false, now())
+				        '2022-01-01', false, now())
 				""".formatted(ACCOUNT, COUNTERPART, isoDate);
 	}
 

@@ -48,7 +48,7 @@ public interface TransactionMapper {
 	@Mapping(target = "id", ignore = true)
 	@Mapping(target = "accountFrom", source = "request.accountFrom")
 	@Mapping(target = "accountTo", source = "request.accountTo")
-	@Mapping(target = "sum", source = "request.sum")
+	@Mapping(target = "amount", source = "request.sum")
 	@Mapping(target = "currency", source = "currency")
 	@Mapping(target = "categoryId", source = "categoryId")
 	@Mapping(target = "occurredAt", source = "occurredAt")
@@ -64,8 +64,8 @@ public interface TransactionMapper {
 
 	default TransactionResponse toResponse(AcceptedTransaction accepted, ZoneId zone) {
 		ExpenseTransaction transaction = accepted.transaction();
-		return new TransactionResponse(transaction.getId(), transaction.getAccountFrom(), transaction.getAccountTo(),
-				accepted.currencyCode(), transaction.getSum(), accepted.expenseCategory(), at(transaction, zone),
+		return new TransactionResponse(transaction.getAccountFrom(), transaction.getAccountTo(), accepted.currencyCode(),
+				transaction.getAmount(), accepted.expenseCategory(), at(transaction, zone),
 				transaction.getSumInLedger(), transaction.getLimitExceeded(), transaction.isFlagCalculated());
 	}
 
@@ -81,10 +81,9 @@ public interface TransactionMapper {
 	default TransactionWithLimitResponse toResponseWithLimit(ExpenseTransaction transaction, String accountFrom,
 			String currencyCode, String expenseCategory, ZoneId zone, OffsetDateTime limitDatetime, BigDecimal limitSum,
 			String limitCurrencyShortname) {
-		return new TransactionWithLimitResponse(transaction.getId(), accountFrom, transaction.getAccountTo(),
-				currencyCode, transaction.getSum(), expenseCategory, at(transaction, zone),
-				transaction.getSumInLedger(), transaction.getLimitExceeded(), limitSum, limitDatetime,
-				limitCurrencyShortname);
+		return new TransactionWithLimitResponse(accountFrom, transaction.getAccountTo(), currencyCode,
+				transaction.getAmount(), expenseCategory, at(transaction, zone), transaction.getSumInLedger(),
+				transaction.getLimitExceeded(), limitSum, limitDatetime, limitCurrencyShortname);
 	}
 
 	private static OffsetDateTime at(ExpenseTransaction transaction, ZoneId zone) {

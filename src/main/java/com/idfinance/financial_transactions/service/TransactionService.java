@@ -103,15 +103,17 @@ public class TransactionService {
 		// The rate is resolved before the lock is taken: an external call takes
 		// seconds, and holding a row
 		// lock across it would block every other transaction of the client.
-		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getSum(), currency,
+		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getAmount(), currency,
 				transaction.getOccurredMonth());
 		if (!conversion.isAvailable()) {
 			// No rate anywhere. The transaction is still stored, so nothing is lost, but
 			// the flag stays
 			// uncalculated rather than being invented. Such rows are recalculated once the
 			// rate appears.
-			transaction.markFlagUncalculated();
-			log.warn("Stored a transaction of {} {} without a flag: no exchange rate available", transaction.getSum(),
+			// No flag is assigned and flag_calculated is derived from limit_exceeded, so the
+			// row stores itself as uncalculated: there is no method to call here and none to
+			// forget.
+			log.warn("Stored a transaction of {} {} without a flag: no exchange rate available", transaction.getAmount(),
 					currency.getCode());
 			this.expenseTransactionRepository.save(transaction);
 			this.metricsRecorder.transactionAccepted(UNCALCULATED);
@@ -121,7 +123,7 @@ public class TransactionService {
 
 		applyFlag(transaction, category);
 		this.expenseTransactionRepository.save(transaction);
-		log.debug("Stored {} {} on {} as {} {}, exceeded={}", transaction.getSum(), currency.getCode(),
+		log.debug("Stored {} {} on {} as {} {}, exceeded={}", transaction.getAmount(), currency.getCode(),
 				transaction.getOccurredAt(), transaction.getSumInLedger(), this.ledgerPolicy.currencyCode(),
 				transaction.getLimitExceeded());
 		return accepted;
@@ -144,12 +146,12 @@ public class TransactionService {
 		BigDecimal spentBefore = this.expenseTransactionRepository.sumInLedgerForMonth(transaction.getAccountFrom(),
 				category.getId(), transaction.getOccurredMonth());
 		BigDecimal runningTotal = spentBefore.add(transaction.getSumInLedger());
-		boolean exceeded = runningTotal.compareTo(limit.getSum()) > 0;
+		boolean exceeded = runningTotal.compareTo(limit.getAmount()) > 0;
 
 		transaction.assignFlag(limit.getId(), exceeded);
 		this.metricsRecorder.transactionAccepted(exceeded ? FLAGGED : WITHIN_LIMIT);
 		log.info("Account {} spent {} of a {} {} limit this month; transaction {} exceeded", limit.getAccountFrom(),
-				runningTotal, limit.getSum(), category.getCode(), exceeded);
+				runningTotal, limit.getAmount(), category.getCode(), exceeded);
 	}
 
 	/**

@@ -67,7 +67,7 @@ public interface ExpenseLimitRepository extends JpaRepository<ExpenseLimit, Long
 	@Query(value = """
 			select l.id                    as id,
 			       cat.code                 as expenseCategory,
-			       l.sum                    as limitSum,
+			       l.amount                 as limitSum,
 			       l.created_at             as limitDatetime,
 			       cur.code                 as currencyShortname,
 			       coalesce(spent.total, 0) as spent
@@ -104,8 +104,8 @@ public interface ExpenseLimitRepository extends JpaRepository<ExpenseLimit, Long
 	 */
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query(value = """
-			insert into expense_limit (account_from, category_id, sum, currency_id, created_at, is_default)
-			select :accountFrom, :categoryId, :sum, :currencyId, to_timestamp(0), true
+			insert into expense_limit (account_from, category_id, amount, currency_id, created_at, is_default)
+			select :accountFrom, :categoryId, :amount, :currencyId, to_timestamp(0), true
 			where not exists (
 			    select 1 from expense_limit l
 			    where l.account_from = :accountFrom and l.category_id = :categoryId
@@ -114,6 +114,6 @@ public interface ExpenseLimitRepository extends JpaRepository<ExpenseLimit, Long
 			on conflict do nothing
 			""", nativeQuery = true)
 	int createDefaultIfAbsent(@Param("accountFrom") String accountFrom, @Param("categoryId") Long categoryId,
-			@Param("sum") BigDecimal sum, @Param("currencyId") Long currencyId, @Param("at") Instant at);
+			@Param("amount") BigDecimal amount, @Param("currencyId") Long currencyId, @Param("at") Instant at);
 
 }

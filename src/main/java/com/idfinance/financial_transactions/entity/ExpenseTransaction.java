@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Generated;
 
 /**
  * One expense operation, as accepted by the ingestion API.
@@ -49,8 +50,8 @@ public final class ExpenseTransaction {
 	@JoinColumn(name = "currency_id", nullable = false)
 	private Currency currency;
 
-	@Column(name = "sum", nullable = false, precision = 14, scale = 2)
-	private BigDecimal sum;
+	@Column(name = "amount", nullable = false, precision = 14, scale = 2)
+	private BigDecimal amount;
 
 	@Column(name = "category_id", nullable = false)
 	private Long categoryId;
@@ -94,17 +95,27 @@ public final class ExpenseTransaction {
 	private Boolean limitExceeded;
 
 	/**
-	 * Separates "computed and false" from "not computed, no rate was available".
+	 * Separates "computed and false" from "not computed, no rate was available" —
+	 * by being derived rather than declared.
+	 *
+	 * <p>
+	 * Computed by the database from {@code limit_exceeded}, so the two cannot drift
+	 * apart. The CHECK that used to stand here was one-directional: it forbade a
+	 * computed flag without an outcome, but happily accepted {@code flagCalculated
+	 * = false} next to {@code limitExceeded = true}, which is the one combination
+	 * that reads as "no verdict" while carrying one. A generated column has no such
+	 * gap, and there is nothing left for application code to forget to set.
 	 */
-	@Column(name = "flag_calculated", nullable = false)
+	@Column(name = "flag_calculated", insertable = false, updatable = false)
+	@Generated
 	private boolean flagCalculated;
 
-	public ExpenseTransaction(String accountFrom, String accountTo, Currency currency, BigDecimal sum, Long categoryId,
-			Instant occurredAt, LocalDate occurredMonth) {
+	public ExpenseTransaction(String accountFrom, String accountTo, Currency currency, BigDecimal amount,
+			Long categoryId, Instant occurredAt, LocalDate occurredMonth) {
 		this.accountFrom = accountFrom;
 		this.accountTo = accountTo;
 		this.currency = currency;
-		this.sum = sum;
+		this.amount = amount;
 		this.categoryId = categoryId;
 		this.occurredAt = occurredAt;
 		this.occurredMonth = occurredMonth;
@@ -130,9 +141,16 @@ public final class ExpenseTransaction {
 	 * Records the limit the flag was computed against.
 	 *
 	 * <p>
-	 * Neither argument may be null here: {@code flagCalculated} would claim the
-	 * answer is known while either half of it is missing, which is exactly the
-	 * state the schema forbids.
+	 * Neither argument may be null here: a flag with no limit behind it, or with no
+	 * outcome, is half of a decision, and the row would report itself as uncalculated
+	 * while carrying the pieces of an answer.
+	 *
+	 * <p>
+	 * There is no counterpart that clears the flag. A transaction accepted without a
+	 * usable rate is simply never assigned one, and {@code flag_calculated} comes out
+	 * false because {@code limit_exceeded} was left null — which is the state a fresh
+	 * entity is already in, so a method that put it back would be writing a value that
+	 * was never anything else.
 	 *
 	 * @throws IllegalArgumentException
 	 *             if the limit or the flag is null
@@ -140,22 +158,10 @@ public final class ExpenseTransaction {
 	public void assignFlag(Long newLimitId, Boolean newLimitExceeded) {
 		if (newLimitId == null || newLimitExceeded == null) {
 			throw new IllegalArgumentException("A computed flag needs both the limit it was compared with and the "
-					+ "outcome; use markFlagUncalculated() when no rate was available");
+					+ "outcome; a transaction with no rate is left unassigned instead");
 		}
 		this.limitId = newLimitId;
 		this.limitExceeded = newLimitExceeded;
-		this.flagCalculated = true;
-	}
-
-	/**
-	 * A transaction accepted without a usable rate keeps its data but stays
-	 * unflagged, so the reporting endpoints never present an invented {@code false}
-	 * as a computed answer.
-	 */
-	public void markFlagUncalculated() {
-		this.limitId = null;
-		this.limitExceeded = null;
-		this.flagCalculated = false;
 	}
 
 }

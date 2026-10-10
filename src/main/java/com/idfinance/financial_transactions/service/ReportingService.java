@@ -114,7 +114,7 @@ public class ReportingService {
 
 	private ExceededRow toRow(ExpenseTransaction transaction, String expenseCategory, ExpenseLimit limit) {
 		return new ExceededRow(transaction, accountFromOf(transaction), expenseCategory, zone, installedAt(limit),
-				(limit != null) ? limit.getSum() : null, (limit != null) ? limit.getCurrency().getCode() : null,
+				(limit != null) ? limit.getAmount() : null, (limit != null) ? limit.getCurrency().getCode() : null,
 				transaction.getCurrency().getCode());
 	}
 

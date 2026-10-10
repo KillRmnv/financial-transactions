@@ -17,7 +17,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * A monthly spend limit. Limits are append-only: the specification forbids
- * updating an existing limit, and the entity exposes no mutator for {@code sum}
+ * updating an existing limit, and the entity exposes no mutator for {@code amount}
  * or {@code createdAt} so that mistake cannot be made by accident.
  *
  * <p>
@@ -42,8 +42,8 @@ public final class ExpenseLimit {
 	@Column(name = "category_id", nullable = false)
 	private Long categoryId;
 
-	@Column(name = "sum", nullable = false, precision = 14, scale = 2)
-	private BigDecimal sum;
+	@Column(name = "amount", nullable = false, precision = 14, scale = 2)
+	private BigDecimal amount;
 
 	/** A limit is always denominated in the currency the ledger is kept in. */
 	@ManyToOne(fetch = FetchType.EAGER, optional = false)
@@ -60,11 +60,12 @@ public final class ExpenseLimit {
 	@Column(name = "is_default", nullable = false)
 	private boolean defaultLimit;
 
-	public ExpenseLimit(String accountFrom, Long categoryId, Currency currency, BigDecimal sum, Instant createdAt) {
+	public ExpenseLimit(String accountFrom, Long categoryId, Currency currency, BigDecimal amount,
+			Instant createdAt) {
 		this.accountFrom = accountFrom;
 		this.categoryId = categoryId;
 		this.currency = currency;
-		this.sum = sum;
+		this.amount = amount;
 		this.createdAt = createdAt;
 	}
 

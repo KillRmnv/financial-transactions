@@ -237,7 +237,9 @@ create table expense_limit
     category_id  smallint      not null references expense_category (id),
     -- Лимит всегда в валюте учёта; ссылка делает это фактом схемы, а не строкой в коде.
     currency_id  smallint      not null references currency (id),
-    sum          numeric(14, 2) not null,
+    -- amount, а не sum: sum — агрегатная функция SQL, и колонка с таким именем заставляет
+    -- заключать sum(...) в кавычки в каждом запросе, который к ней обращается.
+    amount       numeric(14, 2) not null,
     -- Лимит по умолчанию датируется эпохой: он действует, пока его не заменит настоящий. Транзакция
     -- может прийти с датой раньше, чем сервис узнал о клиенте, и «сейчас» в качестве даты
     -- установки оставило бы её вовсе без лимита для сравнения.
@@ -245,7 +247,7 @@ create table expense_limit
     -- Помечает автоматически созданный лимит 1000 USD: он датирован эпохой, и показывать клиенту
     -- «установлено 1 января 1970» хуже, чем не показывать ничего.
     is_default   boolean      not null default false,
-    constraint ck_expense_limit_sum_positive check (sum > 0),
+    constraint ck_expense_limit_amount_positive check (amount > 0),
     constraint ck_expense_limit_account_digits check (account_from ~ '^[0-9]{10}$')
 );
 
@@ -266,7 +268,9 @@ create table expense_transaction
     account_from  varchar(10) not null,
     account_to    varchar(10) not null,
     currency_id   smallint      not null references currency (id),
-    sum           numeric(14, 2) not null,
+    -- amount, а не sum: sum — агрегатная функция SQL. Имя колонки не должно совпадать с
+    -- зарезервированным словом, от которого его приходится экранировать.
+    amount        numeric(14, 2) not null,
     category_id   smallint      not null references expense_category (id),
     -- Исходный offset сохраняется: транзакции приходят с разными часовыми поясами.
     occurred_at   timestamptz not null,
@@ -282,13 +286,16 @@ create table expense_transaction
     -- прошлых транзакций тот лимит, который действует сейчас, а не тот, который их превысил.
     limit_id      bigint   references expense_limit (id),
     limit_exceeded boolean,
-    -- Различает «вычислен и равен false» и «не вычислен, курса не было». Второе — не ошибка, а факт
-    -- о том, что сумму в валюте учёта получить не удалось; выдумывать false там нельзя.
-    flag_calculated boolean     not null default true,
+    -- Различает «вычислен и равен false» и «не вычислен, курса не было» — по наличию строки, а не
+    -- отдельной колонкой: вычисленный флаг и есть limit_exceeded is not null, поэтому хранить второе
+    -- отдельно значило бы хранить производную величину и согласовывать её с оригиналом вручную.
+    --
+    -- Производная колонка, а не CHECK: старый CHECK был односторонним и пропускал
+    -- flag_calculated = false вместе с limit_exceeded = true. Здесь такое состояние невозможно по
+    -- построению — значение вычисляется базой, и ошибиться в нём нельзя.
+    flag_calculated boolean generated always as (limit_exceeded is not null) stored,
     created_at     timestamptz not null default now(),
-    constraint ck_expense_transaction_sum_positive check (sum > 0),
-    -- Невозможно состояние «флаг вычислен, но равен NULL».
-    constraint ck_expense_transaction_flag_state check (not (flag_calculated and limit_exceeded is null)),
+    constraint ck_expense_transaction_amount_positive check (amount > 0),
     constraint ck_expense_transaction_account_from_digits check (account_from ~ '^[0-9]{10}$'),
     constraint ck_expense_transaction_account_to_digits check (account_to ~ '^[0-9]{10}$'),
     -- occurred_at приходит как метка времени с часовым поясом; timestamptz гарантирует, что
