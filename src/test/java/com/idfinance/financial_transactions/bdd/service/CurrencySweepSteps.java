@@ -47,23 +47,17 @@ class CurrencySweepSteps {
 	 * suite rather than just these. This way a missing bean fails here, with a
 	 * message that says which condition did not hold.
 	 */
-	@Autowired
-	private ObjectProvider<WeeklyCurrencyImport> weeklyCurrencyImport;
+	private final ObjectProvider<WeeklyCurrencyImport> weeklyCurrencyImport;
 
-	@Autowired
-	private CurrencyRepository currencyRepository;
+	private final CurrencyRepository currencyRepository;
 
-	@Autowired
-	private StoredWorldCleaner storedWorldCleaner;
+	private final StoredWorldCleaner storedWorldCleaner;
 
-	@Autowired
-	private ExpenseTransactionRepository expenseTransactionRepository;
+	private final ExpenseTransactionRepository expenseTransactionRepository;
 
-	@Autowired
-	private StubRatesProvider stubRatesProvider;
+	private final StubRatesProvider stubRatesProvider;
 
-	@Autowired
-	private ScheduledJobService scheduledJobService;
+	private final ScheduledJobService scheduledJobService;
 
 	/**
 	 * The codes present before this scenario ran, so the sweep's effect is a diff.
@@ -201,4 +195,16 @@ class CurrencySweepSteps {
 				.collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 	}
 
+	@Autowired
+	public CurrencySweepSteps(ObjectProvider<WeeklyCurrencyImport> weeklyCurrencyImport,
+			CurrencyRepository currencyRepository, StoredWorldCleaner storedWorldCleaner,
+			ExpenseTransactionRepository expenseTransactionRepository, StubRatesProvider stubRatesProvider,
+			ScheduledJobService scheduledJobService) {
+		this.weeklyCurrencyImport = weeklyCurrencyImport;
+		this.currencyRepository = currencyRepository;
+		this.storedWorldCleaner = storedWorldCleaner;
+		this.expenseTransactionRepository = expenseTransactionRepository;
+		this.stubRatesProvider = stubRatesProvider;
+		this.scheduledJobService = scheduledJobService;
+	}
 }

@@ -78,6 +78,14 @@ entity "scheduled_job" as scheduled_job {
   description : varchar(255)
 }
 
+entity "shedlock" as shedlock {
+  name        : varchar(64)  <<PK>>
+  --
+  locked_at   : timestamptz
+  locked_by   : varchar(255)
+  locked_until: timestamptz
+}
+
 currency ||--o| currency_pair       : "is swept for"
 currency ||--o{ currency_rate       : "has a rate for"
 currency ||--o{ expense_limit       : "denominated in"
@@ -85,5 +93,8 @@ currency ||--o{ expense_transaction : "denominated in"
 expense_category ||--o{ expense_limit       : "scoped to"
 expense_category ||--o{ expense_transaction : "classified as"
 expense_limit |o--o{ expense_transaction : "measured against"
+
+' ShedLock holds no row of its own; the arrows are the two ways the deployment stops paying twice.
+shedlock ..> scheduled_job : "guards a job, whichever instance wins"
 
 @enduml

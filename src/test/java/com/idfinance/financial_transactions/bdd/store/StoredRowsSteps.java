@@ -27,8 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  */
 class StoredRowsSteps {
 
-	@Autowired
-	private ExpenseTransactionRepository expenseTransactionRepository;
+	private final ExpenseTransactionRepository expenseTransactionRepository;
 
 	@Then("{int} transactions are stored")
 	void transactionsAreStored(int expected) {
@@ -75,4 +74,8 @@ class StoredRowsSteps {
 		return flag;
 	}
 
+	@Autowired
+	public StoredRowsSteps(ExpenseTransactionRepository expenseTransactionRepository) {
+		this.expenseTransactionRepository = expenseTransactionRepository;
+	}
 }

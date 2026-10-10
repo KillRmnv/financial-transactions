@@ -62,47 +62,33 @@ class ServiceLevelSteps {
 
 	private static final String COUNTERPART = "9999999999";
 
-	@Autowired
-	private SettableClock clock;
+	private final SettableClock clock;
 
-	@Autowired
-	private LimitService limitService;
+	private final LimitService limitService;
 
-	@Autowired
-	private TransactionService transactionService;
+	private final TransactionService transactionService;
 
-	@Autowired
-	private ExchangeRateService exchangeRateService;
+	private final ExchangeRateService exchangeRateService;
 
-	@Autowired
-	private ExpenseTransactionRepository expenseTransactionRepository;
+	private final ExpenseTransactionRepository expenseTransactionRepository;
 
-	@Autowired
-	private ExpenseLimitRepository expenseLimitRepository;
+	private final ExpenseLimitRepository expenseLimitRepository;
 
-	@Autowired
-	private CurrencyRateRepository currencyRateRepository;
+	private final CurrencyRateRepository currencyRateRepository;
 
-	@Autowired
-	private CurrencyRepository currencyRepository;
+	private final CurrencyRepository currencyRepository;
 
-	@Autowired
-	private JdbcTemplate jdbcTemplate;
+	private final JdbcTemplate jdbcTemplate;
 
-	@Autowired
-	private StubRatesProvider stubRatesProvider;
+	private final StubRatesProvider stubRatesProvider;
 
-	@Autowired
-	private LedgerPolicy ledgerPolicy;
+	private final LedgerPolicy ledgerPolicy;
 
-	@Autowired
-	private StoredWorldCleaner storedWorldCleaner;
+	private final StoredWorldCleaner storedWorldCleaner;
 
-	@Autowired
-	private StringRedisTemplate redisTemplate;
+	private final StringRedisTemplate redisTemplate;
 
-	@Autowired
-	private MeterRegistry meterRegistry;
+	private final MeterRegistry meterRegistry;
 
 	private String accountFrom;
 
@@ -667,4 +653,26 @@ class ServiceLevelSteps {
 		return flag;
 	}
 
+	@Autowired
+	public ServiceLevelSteps(SettableClock clock, LimitService limitService, TransactionService transactionService,
+			ExchangeRateService exchangeRateService, ExpenseTransactionRepository expenseTransactionRepository,
+			ExpenseLimitRepository expenseLimitRepository, CurrencyRateRepository currencyRateRepository,
+			CurrencyRepository currencyRepository, JdbcTemplate jdbcTemplate, StubRatesProvider stubRatesProvider,
+			LedgerPolicy ledgerPolicy, StoredWorldCleaner storedWorldCleaner, StringRedisTemplate redisTemplate,
+			MeterRegistry meterRegistry) {
+		this.clock = clock;
+		this.limitService = limitService;
+		this.transactionService = transactionService;
+		this.exchangeRateService = exchangeRateService;
+		this.expenseTransactionRepository = expenseTransactionRepository;
+		this.expenseLimitRepository = expenseLimitRepository;
+		this.currencyRateRepository = currencyRateRepository;
+		this.currencyRepository = currencyRepository;
+		this.jdbcTemplate = jdbcTemplate;
+		this.stubRatesProvider = stubRatesProvider;
+		this.ledgerPolicy = ledgerPolicy;
+		this.storedWorldCleaner = storedWorldCleaner;
+		this.redisTemplate = redisTemplate;
+		this.meterRegistry = meterRegistry;
+	}
 }

@@ -42,14 +42,11 @@ class RateCacheDisabledTests {
 
 	private static final String COUNTERPART = "9999999999";
 
-	@Autowired
-	private TransactionService transactionService;
+	private final TransactionService transactionService;
 
-	@Autowired
-	private ExpenseTransactionRepository expenseTransactionRepository;
+	private final ExpenseTransactionRepository expenseTransactionRepository;
 
-	@Autowired
-	private JdbcTemplate jdbcTemplate;
+	private final JdbcTemplate jdbcTemplate;
 
 	/**
 	 * The context is shared by both tests and the rate table has a unique key on
@@ -113,4 +110,11 @@ class RateCacheDisabledTests {
 		return new TransactionRequest(ACCOUNT, COUNTERPART, "KZT", new BigDecimal(sum), "product", moment);
 	}
 
+	@Autowired
+	public RateCacheDisabledTests(TransactionService transactionService,
+			ExpenseTransactionRepository expenseTransactionRepository, JdbcTemplate jdbcTemplate) {
+		this.transactionService = transactionService;
+		this.expenseTransactionRepository = expenseTransactionRepository;
+		this.jdbcTemplate = jdbcTemplate;
+	}
 }

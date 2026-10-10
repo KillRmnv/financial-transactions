@@ -58,11 +58,9 @@ class TransactionIsolationTests {
 
 	private static final String COUNTERPART = "9999999999";
 
-	@Autowired
-	private DataSource dataSource;
+	private final DataSource dataSource;
 
-	@Autowired
-	private JdbcTemplate jdbcTemplate;
+	private final JdbcTemplate jdbcTemplate;
 
 	@BeforeEach
 	void clean() {
@@ -72,10 +70,6 @@ class TransactionIsolationTests {
 
 	@AfterEach
 	void clearAnyLockLeftBehind() {
-		// A test that failed mid-transaction leaves a row lock behind, and the next
-		// test would wait
-		// on it rather than fail on its own account. The lock timeout keeps that from
-		// hanging.
 		this.jdbcTemplate.execute("set lock_timeout = '2s'");
 	}
 
@@ -132,7 +126,6 @@ class TransactionIsolationTests {
 	@Test
 	void anUncommittedTransactionIsInvisibleToAnother() throws Exception {
 		BigDecimal committedTotal = withBlockedConnection((blocking) -> {
-			// The blocker holds a transaction open with one row in it, uncommitted.
 			run(blocking, insert("2022-01-05"));
 			return totalForMonth();
 		});
@@ -282,4 +275,9 @@ class TransactionIsolationTests {
 		}
 	}
 
+	@Autowired
+	public TransactionIsolationTests(DataSource dataSource, JdbcTemplate jdbcTemplate) {
+		this.dataSource = dataSource;
+		this.jdbcTemplate = jdbcTemplate;
+	}
 }

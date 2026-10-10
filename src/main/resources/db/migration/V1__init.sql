@@ -1,11 +1,5 @@
 -- Схема финансовых транзакций.
 --
--- Проект в разработке и нигде не задеплоен, поэтому схема описана одним скриптом, а не историей
--- правок. Flyway нужен не ради версионирования, а ради того, что миграция — единственный
--- воспроизводимый способ поднять базу.
---
--- Порядок таблиц соответствует ссылкам: справочники, потом то, что на них ссылается.
-
 -- Справочник валют.
 --
 -- Код валюты — это зафиксированный контракт, а не свободная строка: CHECK не даёт записать 'kzt'
@@ -216,8 +210,7 @@ create table currency_pair
     constraint ux_currency_pair unique (base_currency)
 );
 
--- Стартовый набор: ровно те пары, которые спецификация (п.3) просит опрашивать ежедневно —
--- KZT/USD и RUB/USD. Цитата у обеих USD, что совпадает с app.ledger.currency-code.
+
 insert into currency_pair (base_currency)
 values ('KZT'),
        ('RUB');
@@ -227,8 +220,7 @@ create index ix_currency_pair_active on currency_pair (active) where active;
 -- Месячные лимиты расходов. Неизменяемы: только добавление, обновление запрещено спецификацией,
 -- поэтому у сущности нет ни сеттера sum, ни сеттера created_at.
 --
--- account_from — varchar(10), а не ссылка на таблицу счетов: в спецификации сказано ровно одно про
--- счёт («строка из 10 цифр»), и это описание формата поля. Нормализация потребовала бы знать про счёт
+-- account_from — varchar(10), а не ссылка на таблицу счетов и это описание формата поля. Нормализация потребовала бы знать про счёт
 -- то, чего в задаче нет (владелец, валюта счёта, статус).
 create table expense_limit
 (
@@ -237,8 +229,6 @@ create table expense_limit
     category_id  smallint      not null references expense_category (id),
     -- Лимит всегда в валюте учёта; ссылка делает это фактом схемы, а не строкой в коде.
     currency_id  smallint      not null references currency (id),
-    -- amount, а не sum: sum — агрегатная функция SQL, и колонка с таким именем заставляет
-    -- заключать sum(...) в кавычки в каждом запросе, который к ней обращается.
     amount       numeric(14, 2) not null,
     -- Лимит по умолчанию датируется эпохой: он действует, пока его не заменит настоящий. Транзакция
     -- может прийти с датой раньше, чем сервис узнал о клиенте, и «сейчас» в качестве даты
@@ -268,18 +258,14 @@ create table expense_transaction
     account_from  varchar(10) not null,
     account_to    varchar(10) not null,
     currency_id   smallint      not null references currency (id),
-    -- amount, а не sum: sum — агрегатная функция SQL. Имя колонки не должно совпадать с
-    -- зарезервированным словом, от которого его приходится экранировать.
     amount        numeric(14, 2) not null,
     category_id   smallint      not null references expense_category (id),
-    -- Исходный offset сохраняется: транзакции приходят с разными часовыми поясами.
     occurred_at   timestamptz not null,
     -- Первое число месяца в часовом поясе учёта, чтобы не пересчитывать границы на каждый запрос.
     occurred_month date        not null,
-    -- Сумма в валюте учёта (app.ledger.currency-code). Имя намеренно не mentions USD: валюта учёта
+    -- Сумма в валюте учёта (app.ledger.currency-code). Валюта учёта
     -- задаётся конфигурацией, и колонка хранит именно её сумму.
     ledger_sum    numeric(14, 2),
-    -- Единиц валюты учёта на одну единицу валюты транзакции.
     applied_rate  numeric(19, 8),
     rate_date     date,
     -- Лимит, по которому на самом деле выставлялся флаг. Без него запрос отчётности вывел бы для
@@ -298,8 +284,6 @@ create table expense_transaction
     constraint ck_expense_transaction_amount_positive check (amount > 0),
     constraint ck_expense_transaction_account_from_digits check (account_from ~ '^[0-9]{10}$'),
     constraint ck_expense_transaction_account_to_digits check (account_to ~ '^[0-9]{10}$'),
-    -- occurred_at приходит как метка времени с часовым поясом; timestamptz гарантирует, что
-    -- PostgreSQL примет только корректную ISO-8601 метку и отвергнет мусор вроде 'yesterday'.
     constraint ck_expense_transaction_occurred_at_sane check (occurred_at > timestamptz '1990-01-01 00:00:00+00')
 );
 
@@ -323,8 +307,6 @@ create table currency_rate
     rate_date       date         not null,
     close           numeric(19, 8),
     previous_close  numeric(19, 8),
-    -- Каким провайдером получено значение: при смене провайдера старые строки остаются помеченными
-    -- как пришедшие из прежнего, и это видно без догадок.
     source          varchar(32)  not null,
     fetched_at      timestamptz  not null default now(),
     constraint ux_currency_rate_base_date unique (base_currency, rate_date),

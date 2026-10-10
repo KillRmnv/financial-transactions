@@ -33,23 +33,17 @@ import org.springframework.web.client.RestClientResponseException;
  */
 class RateLimitSteps {
 
-	@Autowired
-	private RestClient.Builder restClientBuilder;
+	private final RestClient.Builder restClientBuilder;
 
-	@Autowired
-	private Environment environment;
+	private final Environment environment;
 
-	@Autowired
-	private ExpenseTransactionRepository expenseTransactionRepository;
+	private final ExpenseTransactionRepository expenseTransactionRepository;
 
-	@Autowired
-	private ExpenseLimitRepository expenseLimitRepository;
+	private final ExpenseLimitRepository expenseLimitRepository;
 
-	@Autowired
-	private CurrencyRateRepository currencyRateRepository;
+	private final CurrencyRateRepository currencyRateRepository;
 
-	@Autowired
-	private StoredWorldCleaner storedWorldCleaner;
+	private final StoredWorldCleaner storedWorldCleaner;
 
 	private String baseUrl;
 
@@ -157,4 +151,15 @@ class RateLimitSteps {
 		}
 	}
 
+	@Autowired
+	public RateLimitSteps(RestClient.Builder restClientBuilder, Environment environment,
+			ExpenseTransactionRepository expenseTransactionRepository, ExpenseLimitRepository expenseLimitRepository,
+			CurrencyRateRepository currencyRateRepository, StoredWorldCleaner storedWorldCleaner) {
+		this.restClientBuilder = restClientBuilder;
+		this.environment = environment;
+		this.expenseTransactionRepository = expenseTransactionRepository;
+		this.expenseLimitRepository = expenseLimitRepository;
+		this.currencyRateRepository = currencyRateRepository;
+		this.storedWorldCleaner = storedWorldCleaner;
+	}
 }

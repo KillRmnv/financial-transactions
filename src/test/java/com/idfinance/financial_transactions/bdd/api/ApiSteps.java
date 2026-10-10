@@ -63,24 +63,15 @@ import tools.jackson.databind.ObjectMapper;
 
 class ApiSteps {
 	private static final String COUNTERPART = "9999999999";
-	@Autowired
-	private ObjectMapper objectMapper;
-	@Autowired
-	private SettableClock clock;
-	@Autowired
-	private ExpenseTransactionRepository expenseTransactionRepository;
-	@Autowired
-	private ExpenseLimitRepository expenseLimitRepository;
-	@Autowired
-	private CurrencyRateRepository currencyRateRepository;
-	@Autowired
-	private RestClient.Builder restClientBuilder;
-	@Autowired
-	private HttpRatesStub ratesStub;
-	@Autowired
-	private StoredWorldCleaner storedWorldCleaner;
-	@Autowired
-	private Environment environment;
+	private final ObjectMapper objectMapper;
+	private final SettableClock clock;
+	private final ExpenseTransactionRepository expenseTransactionRepository;
+	private final ExpenseLimitRepository expenseLimitRepository;
+	private final CurrencyRateRepository currencyRateRepository;
+	private final RestClient.Builder restClientBuilder;
+	private final HttpRatesStub ratesStub;
+	private final StoredWorldCleaner storedWorldCleaner;
+	private final Environment environment;
 	private String accountFrom;
 	private String category;
 	private String baseUrl;
@@ -665,5 +656,26 @@ class ApiSteps {
 		ArrayList<String> codes = new ArrayList<String>();
 		this.responseBody.forEach(node -> codes.add(node.asText()));
 		return codes;
+	}
+	@Autowired
+	public rather(
+		ObjectMapper objectMapper,
+		SettableClock clock,
+		ExpenseTransactionRepository expenseTransactionRepository,
+		ExpenseLimitRepository expenseLimitRepository,
+		CurrencyRateRepository currencyRateRepository,
+		RestClient.Builder restClientBuilder,
+		HttpRatesStub ratesStub,
+		StoredWorldCleaner storedWorldCleaner,
+		Environment environment) {
+		this.objectMapper = objectMapper;
+		this.clock = clock;
+		this.expenseTransactionRepository = expenseTransactionRepository;
+		this.expenseLimitRepository = expenseLimitRepository;
+		this.currencyRateRepository = currencyRateRepository;
+		this.restClientBuilder = restClientBuilder;
+		this.ratesStub = ratesStub;
+		this.storedWorldCleaner = storedWorldCleaner;
+		this.environment = environment;
 	}
 }

@@ -139,6 +139,26 @@ mechanism.
 keys at its root. `financial.rates.resolved` counts a `source="cache"` resolution, which is the
 number that says whether the cache is earning its place.
 
+## The schema
+
+![The database model](docs/db-model.png)
+
+The source of the diagram is `docs/db-model.puml`, rendered with PlantUML; the tables are the
+migrations, and a column added to a diagram but not to a migration is a drawing rather than a schema.
+Four things it is worth seeing at a glance:
+
+- **`currency` is a verified reference, everywhere.** Both `expense_limit.currency_id` and
+  `expense_transaction.currency_id` point at it, and `currency_rate.base_currency` references its code.
+  Nothing in the schema stores a currency code from a request as a string.
+- **There is no `account` table**, and `account_from` / `account_to` are plain `varchar(10)` columns
+  with a digit check. The specification describes a field format, not an entity.
+- **`expense_transaction.limit_id` is a foreign key, so the flag stays reproducible.** Recomputing
+  which limit was in effect at the transaction date would report a different limit the moment a new
+  one is installed.
+- **`scheduled_job` and `shedlock` are operational, not domain.** One says which job runs, the other
+  which instance runs it; neither is what the specification calls for, and the community demo
+  does not need either.
+
 ## Running it
 
 Requirements: a JDK and Docker. Tests need Docker for Testcontainers; they bring up their own

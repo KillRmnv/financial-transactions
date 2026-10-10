@@ -79,16 +79,12 @@ server:
     threads:
       max: 40
       min-spare: 10
-    # A client that opens a connection and sends nothing holds a thread until this expires. Five seconds
-    # is the default and is generous for a JSON API.
     connection-timeout: 5s
     accept-count: 50
 
 logging:
   level:
     com.idfinance.financial_transactions: INFO
-    # Hibernate's statement log is off by default: it is a firehose, not a diagnostic, and the useful
-    # version of the same information is the slow-query log on the database.
     org.hibernate.SQL: WARN
 
 management:
@@ -97,5 +93,4 @@ management:
       show-details: never
   metrics:
     tags:
-      # Lets a single dashboard hold several deployments without re-labelling anything.
       environment: ${DEPLOYMENT_ENVIRONMENT:production}

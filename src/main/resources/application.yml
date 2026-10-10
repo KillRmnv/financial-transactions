@@ -14,7 +14,6 @@ management:
   endpoints:
     web:
       exposure:
-        # prometheus is the scrape target; heapdump is deliberately absent, see the note on it below.
         include: health,info,metrics,prometheus
   endpoint:
     health:
@@ -30,8 +29,6 @@ management:
       enabled: true
 
 springdoc:
-  # The title, version and description come from the @Bean in OpenApiConfiguration, because springdoc 3
-  # ignores springdoc.api-docs.info.*. Only the UI settings below are properties.
   swagger-ui:
     path: /swagger-ui.html
     operations-sorter: alpha
@@ -45,45 +42,31 @@ app:
   scheduling:
     enabled: true
 
-  # The one timezone month boundaries are computed in. Transactions arrive with assorted offsets, so
-  # "the first transaction of March" has to mean the same thing regardless of the sender.
   month-timezone: UTC
 
-  # Applied when a client never installed a limit, per the specification, denominated in the ledger
-  # currency below.
   default-limit-sum: 1000.00
 
   ledger:
-    # Валюта учёта: лимиты номинированы в ней, каждая транзакция переводится в неё перед сравнением с
-    # месячным итогом, и все курсы хранятся именно к ней. Спецификация фиксирует USD, но код этого нигде
-    # не предполагает — перевод учёта на другую валюту это изменение свойства плюс миграция данных.
     currency-code: USD
-    # Знаков после запятой у денежной суммы. Из спецификации: «десятичное число, 2 знака после точки».
+    # Знаков после запятой у денежной суммы.
     amount-scale: 2
 
-  # Кэш курсов в Redis поверх таблицы currency_rate. Необязательное требование 2* ТЗ.
-  #
+
   # Это именно кэш, а не второй источник истины: база отвечает и сама по себе, а недоступный Redis
   # стоит одного лишнего обращения и ничего больше. enabled: false отключает обращения к Redis
   # целиком — все пути продолжают работать, поэтому выключить в окружении без Redis безопасно.
   cache:
     enabled: true
-    # Курсы публикуются раз в сутки, поэтому TTL — это страховка от потерянной инвалидации, а не
-    # основной механизм: инвалидация делается счётчиком поколений при каждой записи курса.
     ttl: 12h
     # Префикс ключей: общий Redis не должен получать наши ключи в корень.
     key-prefix: "financial:rate:"
 
-  # Hour of the daily refresh, in app.month-timezone.
   scheduled-fetch-hour: 7
 
   rates:
-    # Identified in every stored rate, so a staging instance talking to a sandbox and production
-    # talking to a paid tier stay distinguishable in the data.
     source: ${RATES_SOURCE:twelvedata}
     # Empty means no external provider is configured and rates are read from the database only.
     base-url: ${RATES_API_BASE_URL:}
-    # From the environment, never committed.
     api-key: ${RATES_API_KEY:}
     connect-timeout: 3s
     read-timeout: 5s
@@ -106,13 +89,10 @@ app:
   # Request quotas. The annotation on a handler names one of these blocks; the numbers declared on the
   # annotation are only a fallback, so a new limited endpoint is never silently unlimited.
   rate-limits:
-    # Квота в терминах самого лимитера: сколько запросов разрешено за период. Блок ingestion — горячий
-    # путь, он же пишет строки.
     ingestion:
       limit-for-period: 60
       limit-refresh-period: 1s
       retry-after-seconds: 1
-    # Установка лимита тоже пишет строку, но клиент не делает это в цикле.
     limit-install:
       limit-for-period: 30
       limit-refresh-period: 1s
