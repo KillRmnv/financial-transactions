@@ -83,6 +83,12 @@ app:
     attempts: 3
     retry-backoff: 500ms
 
+    # The fallback, asked only when the provider above has no answer. No key and no quota,
+    # which is why this is one URL and nothing else — see the note on the two providers in
+    # docs/assumptions.md. Empty switches it off, leaving the paid provider as the only one.
+    frankfurter:
+      base-url: ${FRANKFURTER_API_BASE_URL:https://api.frankfurter.dev}
+
   # The currencies the daily sweep prefetches rates for live in the currency_pair table, not here:
   # an operator must be able to add or retire one without a release, and every call to the
   # external API is paid for. The table stores the base currency only — the quote comes from

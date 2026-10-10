@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * What the database guarantees, checked directly against it.
@@ -51,6 +52,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * which provider it is, only what the database does with the rows.
  */
 @SpringBootTest
+// Both provider URLs empty so the fallback composite is absent and the
+// in-process stub
+// is the only RatesProvider. Two @Primary beans of that type is a context that
+// will not
+// start, and a composite over a stub has nothing to fall back to in any case.
+@TestPropertySource(properties = {"app.rates.base-url=", "app.rates.frankfurter.base-url="})
 @Import({TestcontainersConfiguration.class, StubRatesConfiguration.class})
 class TransactionIsolationTests {
 

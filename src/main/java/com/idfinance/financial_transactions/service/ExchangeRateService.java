@@ -120,7 +120,7 @@ public class ExchangeRateService {
 	private Optional<ExchangeRate> findStored(Currency currency, LocalDate rateDate) {
 		Optional<ExchangeRate> found = Stream
 				.of(this.currencyRateRepository.findForDay(currency, rateDate),
-						this.currencyRateRepository.findLatestOnOrBefore(currency, rateDate))
+						this.currencyRateRepository.findLatestOnOrBefore(currency.getCode(), rateDate))
 				.flatMap(Optional::stream).map(rate -> ExchangeRate.from(rate, this.ledgerPolicy.currencyCode()))
 				.filter(ExchangeRate::effectiveRateIsPositive).findFirst();
 		found.ifPresent(
@@ -169,7 +169,12 @@ public class ExchangeRateService {
 	 */
 	@Transactional
 	public void store(Currency currency, ExchangeRate rate) {
-		String provider = this.ratesProvider.name();
+		// From the rate, not from the provider: with a fallback in play the provider
+		// asked is
+		// not always the one that answered, and currency_rate.source exists to name the
+		// one that
+		// supplied the number.
+		String provider = rate.source();
 		boolean inserted = this.currencyRateRepository.upsert(currency.getCode(), rate.rateDate(), rate.close(),
 				rate.previousClose(), provider) > 0;
 		log.debug("{} the {} rate for {}: {}", inserted ? "Stored" : "Refreshed", currency.getCode(), rate.rateDate(),

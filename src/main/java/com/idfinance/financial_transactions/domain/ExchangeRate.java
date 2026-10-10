@@ -24,9 +24,23 @@ import java.time.LocalDate;
  *            closing rate of the day
  * @param previousClose
  *            the last known close, used when the day has no close of its own
+ * @param source
+ *            the provider that supplied this rate, carried so a stored row can
+ *            be traced to the one that answered. It travels with the rate
+ *            rather than being asked of the provider at write time, because
+ *            with a fallback in play the provider that answered is not
+ *            necessarily the provider that was asked first — and a rate
+ *            recorded under the wrong name is worse than one recorded under
+ *            none
  */
 public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate rateDate, BigDecimal close,
-		BigDecimal previousClose) {
+		BigDecimal previousClose, String source) {
+
+	/**
+	 * The source of a rate that came from nowhere because it needed no provider:
+	 * one unit of the ledger currency is one unit of itself.
+	 */
+	public static final String IDENTITY_SOURCE = "identity";
 
 	/**
 	 * Digits kept when a rate is inverted. Wider than the eight the column stores,
@@ -72,7 +86,7 @@ public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate 
 	 */
 	public static ExchangeRate from(CurrencyRate rate, String ledgerCurrencyCode) {
 		return new ExchangeRate(rate.getBaseCurrency().getCode(), ledgerCurrencyCode, rate.getRateDate(),
-				rate.getClose(), rate.getPreviousClose());
+				rate.getClose(), rate.getPreviousClose(), rate.getSource());
 	}
 
 	/**
@@ -80,7 +94,7 @@ public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate 
 	 * nothing to fetch.
 	 */
 	public static ExchangeRate identity(String ledgerCurrencyCode, LocalDate date) {
-		return new ExchangeRate(ledgerCurrencyCode, ledgerCurrencyCode, date, BigDecimal.ONE, null);
+		return new ExchangeRate(ledgerCurrencyCode, ledgerCurrencyCode, date, BigDecimal.ONE, null, IDENTITY_SOURCE);
 	}
 
 	/**
@@ -106,7 +120,7 @@ public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate 
 	 */
 	public ExchangeRate inverted() {
 		return new ExchangeRate(this.quoteCurrency, this.baseCurrency, this.rateDate, invert(this.close),
-				invert(this.previousClose));
+				invert(this.previousClose), this.source);
 	}
 
 	private static BigDecimal invert(BigDecimal rate) {

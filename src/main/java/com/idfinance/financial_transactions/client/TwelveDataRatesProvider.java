@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.client.ClientHttpRequestFactory;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriBuilder;
 
 /**
  * Wire adapter for <a href="https://twelvedata.com">Twelve Data</a>, and for no
@@ -166,33 +168,169 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 		}));
 	}
 
+	/**
+	 * The close of that day, and the last close before it as the fallback.
+	 *
+	 * <p>
+	 * <strong>The provider does not send {@code previous_close}.</strong> Its
+	 * answer carries exactly {@code datetime, open, high, low, close} — checked
+	 * against the live API, not assumed. Reading that field, which this record was
+	 * written to do, therefore produces null on every request, and the rule the
+	 * specification states for п.3 — no close for the day, a weekend or a holiday,
+	 * so use the previous close — never runs. It fails quietly: the transaction is
+	 * stored without a flag, which is the right answer to a missing rate and the
+	 * wrong one to a rate that exists.
+	 *
+	 * <p>
+	 * The fallback is computed here, out of what the provider does send: one more
+	 * request over a window ending on the day before, whose latest point is the
+	 * last close before it. Forex pairs trade through weekends, so the gap is rare
+	 * — but a holiday or a provider gap closes a series, and the specification asks
+	 * for that day to be priced rather than skipped.
+	 *
+	 * <p>
+	 * A window rather than a single "previous" query because the provider has no
+	 * such endpoint, and asking one day at a time would need to know in advance
+	 * which day the last one was.
+	 */
 	private ExchangeRate fetchOnce(String symbol, String baseCurrency, String quoteCurrency, LocalDate date) {
-		TimeSeriesResponse response;
+		TimeSeriesResponse ofTheDay = request(symbol, (builder) -> builder.queryParam("date", date.toString()));
+		if (ofTheDay == null) {
+			return null;
+		}
+
+		// Either shape of "no rate for that day" leads to the same place: the provider
+		// omits a
+		// closed day from the series entirely, so an empty answer is the holiday case
+		// rather
+		// than a failure, and a present entry with a null close is the same thing from
+		// another
+		// API version. Deciding between them here would mean deciding which one to
+		// believe.
+		TimeSeriesResponse.Value value = valueFor(ofTheDay, date);
+		if (value != null && value.close() != null) {
+			// A previous_close is kept when a deployment of the API does send one: it is
+			// the
+			// provider's own answer rather than one reconstructed from a window.
+			return new ExchangeRate(baseCurrency, quoteCurrency, date, value.close(), value.previousClose(), name());
+		}
+
+		BigDecimal previous = lastCloseBefore(symbol, date);
+		if (previous == null) {
+			return null;
+		}
+		log.debug("{} has no close for {} on {}, falling back to {}", this.properties.rates().source(), symbol, date,
+				previous);
+		return new ExchangeRate(baseCurrency, quoteCurrency, date, null, previous, name());
+	}
+
+	/**
+	 * How far back the fallback request looks.
+	 *
+	 * <p>
+	 * Ten days is a calendar fortnight, which covers the longest run of closed days
+	 * a currency market has — a holiday weekend plus a day either side — without a
+	 * window wide enough for the answer to reach past a gap the specification would
+	 * rather see reported as missing.
+	 */
+	private static final int FALLBACK_WINDOW_DAYS = 10;
+
+	/**
+	 * How the provider says a date is outside the history its plan keeps.
+	 *
+	 * <p>
+	 * Matched on the body rather than on the status alone: 400 also covers a
+	 * request this adapter got wrong, and treating that as "no data" would turn a
+	 * bug into a transaction quietly stored without a flag.
+	 */
+	private static final String NO_DATA = "No data is available";
+
+	/**
+	 * The last close strictly before the day asked for, or null when the window
+	 * holds none.
+	 */
+	private BigDecimal lastCloseBefore(String symbol, LocalDate date) {
+		LocalDate from = date.minusDays(FALLBACK_WINDOW_DAYS);
+		TimeSeriesResponse window = request(symbol, (builder) -> builder.queryParam("start_date", from.toString())
+				.queryParam("end_date", date.minusDays(1).toString()));
+		if (window == null || window.values() == null) {
+			return null;
+		}
+		// The newest of the points in the window, found by date rather than by
+		// position: this
+		// provider answers newest first, so the last element happens to be the oldest,
+		// and a
+		// provider answering the other way round would then silently price the day from
+		// the far
+		// end of the window. Comparing the dates makes that an error instead of a wrong
+		// number.
+		return window.values().stream()
+				.filter(value -> value != null && value.datetime() != null && value.close() != null)
+				.filter(value -> !value.datetime().isBefore(from) && value.datetime().isBefore(date))
+				.map(TimeSeriesResponse.Value::datetime).max(LocalDate::compareTo)
+				.map(latest -> window.values().stream()
+						.filter(value -> value.datetime() != null && value.datetime().equals(latest))
+						.map(TimeSeriesResponse.Value::close).findFirst().orElse(null))
+				.orElse(null);
+	}
+
+	/**
+	 * One call, with the provider's "no such symbol" answer treated as no answer
+	 * rather than as a failure.
+	 */
+	private TimeSeriesResponse request(String symbol, Function<UriBuilder, UriBuilder> query) {
 		try {
-			response = this.restClient.get()
-					.uri(uriBuilder -> uriBuilder.path("/time_series").queryParam("symbol", symbol)
-							.queryParam("interval", "1day").queryParam("date", date.toString())
-							.queryParam("apikey", this.properties.rates().apiKey()).build())
+			return this.restClient.get()
+					.uri(uriBuilder -> query.apply(uriBuilder.path("/time_series").queryParam("symbol", symbol)
+							.queryParam("interval", "1day").queryParam("apikey", this.properties.rates().apiKey()))
+							.build())
 					.retrieve().body(TimeSeriesResponse.class);
 		} catch (HttpClientErrorException.NotFound ex) {
 			// The symbol does not exist for this provider, which is a fact about the pair
-			// rather than a failure of the call: asking again cannot create it, and letting
-			// the exception out would spend every retry before the caller could try the
-			// other
+			// rather
+			// than a failure of the call: asking again cannot create it, and letting the
+			// exception
+			// out would spend every retry before the caller could try the other
 			// orientation.
 			log.debug("{} has no symbol {}: {}", this.properties.rates().source(), symbol,
 					ex.getResponseBodyAsString());
 			return null;
+		} catch (HttpClientErrorException.BadRequest ex) {
+			// The provider answers 400 "No data is available on the specified dates" for a
+			// date
+			// older than the history its plan keeps — a fact about the data, not a
+			// malformed
+			// request. Let it out and the log reads "400 Bad Request" against our own call,
+			// which
+			// is both wrong and alarming on a date the specification is full of. Any other
+			// 400 is
+			// still a defect on this side and still travels.
+			if (ex.getResponseBodyAsString().contains(NO_DATA)) {
+				log.debug("{} has no data before the date asked for: {}", this.properties.rates().source(),
+						ex.getResponseBodyAsString());
+				return null;
+			}
+			throw ex;
 		}
+	}
 
-		if (response == null || response.values() == null || response.values().isEmpty()) {
+	/**
+	 * The entry describing one day, whichever end of the answer the provider listed
+	 * it at.
+	 *
+	 * <p>
+	 * The date is compared rather than assuming the first entry is the day asked
+	 * for: a request for a single date sometimes comes back with only a
+	 * {@code meta} block, and then there is no entry to compare at all, which is
+	 * different from an entry for a different day.
+	 */
+	private static TimeSeriesResponse.Value valueFor(TimeSeriesResponse response, LocalDate date) {
+		if (response.values() == null || response.values().isEmpty()) {
 			return null;
 		}
-		TimeSeriesResponse.Value first = response.values().getFirst();
-		if (first == null || (first.close() == null && first.previousClose() == null)) {
-			return null;
-		}
-		return new ExchangeRate(baseCurrency, quoteCurrency, date, first.close(), first.previousClose());
+		return response.values().stream().filter(value -> value != null && value.datetime() != null)
+				.filter(value -> value.datetime().equals(date)).findFirst()
+				.orElseGet(() -> (response.values().size() == 1) ? response.values().getFirst() : null);
 	}
 
 	/**
@@ -317,7 +455,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 		 *            on weekends and holidays; spelled {@code previous_close} on the
 		 *            wire and camel cased here
 		 */
-		record Value(BigDecimal close, @JsonProperty("previous_close") BigDecimal previousClose) {
+		record Value(LocalDate datetime, BigDecimal close, @JsonProperty("previous_close") BigDecimal previousClose) {
 		}
 
 	}

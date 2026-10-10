@@ -196,7 +196,7 @@ class ServiceLevelSteps {
 	void theRateForCurrencyIsRefreshedTo(String currency, String isoDate, String rate) {
 		LocalDate day = LocalDate.parse(isoDate);
 		ExchangeRate refreshed = new ExchangeRate(currency, this.ledgerPolicy.currencyCode(), day, new BigDecimal(rate),
-				null);
+				null, "stub");
 		this.exchangeRateService.store(currencyOf(currency), refreshed);
 		Assertions.assertThat(this.currencyRateRepository.findForDay(currencyOf(currency), day))
 				.as("the refreshed rate of %s on %s", currency, isoDate).isPresent();

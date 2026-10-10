@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -57,7 +58,16 @@ public class WireMockRatesConfiguration {
 		return new AppProperties(delegate.defaultLimitSum(), delegate.monthTimezone(), delegate.scheduledFetchHour(),
 				new AppProperties.Rates("wiremock", "http://localhost:" + PORT, "test-key",
 						delegate.rates().connectTimeout(), delegate.rates().readTimeout(), delegate.rates().attempts(),
-						delegate.rates().retryBackoff()));
+						delegate.rates().retryBackoff(),
+						// The fallback points at the same server, not at the public instance. Leaving
+						// it
+						// on the real URL would have the suite reach the internet, and two consequences
+						// follow: a stub means nothing, and a pair nobody stubbed is quietly answered
+						// by a
+						// live provider — which is how scenarios that assert "stored without a flag"
+						// start
+						// failing for a reason that has nothing to do with what they are testing.
+						new AppProperties.Rates.Frankfurter("http://localhost:" + PORT)));
 	}
 
 	/**
@@ -85,10 +95,64 @@ public class WireMockRatesConfiguration {
 		 * {@code values[]} with {@code close} and {@code previous_close}.
 		 */
 		public void closeOn(String baseCurrency, String quoteCurrency, LocalDate date, BigDecimal close) {
+			// The date is in the body because the adapter now compares it rather than
+			// trusting
+			// the position of the entry. A stub whose datetime was decorative would pass
+			// every
+			// scenario that answered with a close and fail the one that did not, which is
+			// exactly
+			// the shape of the bug this provider check was written for.
 			String body = """
-					{"values":[{"close":%s,"previous_close":null}]}""".formatted(close.toPlainString());
+					{"values":[{"datetime":"%s","close":%s,"previous_close":null}]}""".formatted(date.toString(),
+					close.toPlainString());
 			this.published.add(new ServedRate(baseCurrency, quoteCurrency, date, body));
 			answer(baseCurrency, quoteCurrency, date, body, Duration.ZERO);
+		}
+
+		/**
+		 * Answers a single date with nothing in it, which is how a closed day looks.
+		 *
+		 * <p>
+		 * The provider sends an answer with no {@code values} rather than one with a
+		 * null close: a holiday is missing from the series, not present in it with a
+		 * hole in the price. Both readings reach the same fallback, and stubbing the
+		 * real shape is what keeps the scenario from passing for the wrong reason.
+		 */
+		public void withoutCloseOn(String baseCurrency, String quoteCurrency, LocalDate date) {
+			String symbol = baseCurrency + "/" + quoteCurrency;
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
+					.withQueryParam("symbol", WireMock.equalTo(symbol))
+					.withQueryParam("date", WireMock.equalTo(date.toString()))
+					.willReturn(WireMock.okJson("{\"meta\":{\"symbol\":\"" + symbol + "\"},\"values\":[]}")));
+		}
+
+		/**
+		 * Answers a window request with the days given, newest first as the provider
+		 * does.
+		 *
+		 * <p>
+		 * The adapter builds its own {@code previous_close} out of this, because the
+		 * provider does not send one — its answers carry exactly
+		 * {@code datetime, open, high, low, close}. A stub that always included
+		 * {@code previous_close} would have hidden that: the field was read, read
+		 * correctly, and never once populated by anything real.
+		 *
+		 * @param dates
+		 *            the days in the window, as {@code date -> close}
+		 */
+		public void window(String baseCurrency, String quoteCurrency, Map<LocalDate, BigDecimal> dates) {
+			String symbol = baseCurrency + "/" + quoteCurrency;
+			String values = dates.entrySet().stream()
+					.sorted(Map.Entry.<LocalDate, BigDecimal>comparingByKey().reversed())
+					.map((entry) -> """
+							{"datetime":"%s","open":null,"high":null,"low":null,"close":%s}"""
+							.formatted(entry.getKey().toString(), entry.getValue().toPlainString()))
+					.collect(java.util.stream.Collectors.joining(","));
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
+					.withQueryParam("symbol", WireMock.equalTo(symbol))
+					.withQueryParam("start_date", WireMock.matching(".+"))
+					.withQueryParam("end_date", WireMock.matching(".+"))
+					.willReturn(WireMock.okJson("{\"values\":[" + values + "]}")));
 		}
 
 		/**
@@ -146,7 +210,8 @@ public class WireMockRatesConfiguration {
 				BigDecimal previousClose) {
 			String symbol = baseCurrency + "/" + quoteCurrency;
 			String body = """
-					{"values":[{"close":null,"previous_close":%s}]}""".formatted(previousClose.toPlainString());
+					{"values":[{"datetime":"%s","close":null,"previous_close":%s}]}""".formatted(date.toString(),
+					previousClose.toPlainString());
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
 					.withQueryParam("symbol", WireMock.equalTo(symbol))
 					.withQueryParam("date", WireMock.equalTo(date.toString())).willReturn(WireMock.okJson(body)));
@@ -160,6 +225,91 @@ public class WireMockRatesConfiguration {
 		public void failing() {
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
 					.willReturn(WireMock.serverError().withStatus(503)));
+		}
+
+		// --- Frankfurter ---
+		//
+		// The fallback is on the same server, so the real adapter is exercised through
+		// the
+		// same HTTP boundary as the paid one. It needs no configuration beyond the URL,
+		// which
+		// is why these stubs are here rather than behind a second server.
+
+		/**
+		 * One pair, in the orientation asked for — which is the whole point of this
+		 * provider: {@code /v2/rate/usd/kzt} answers directly, so there is no 404 to
+		 * retry the other way round.
+		 */
+		public void frankfurterRateOn(String baseCurrency, String quoteCurrency, LocalDate date, BigDecimal rate) {
+			this.server.stubFor(WireMock
+					.get(WireMock.urlPathEqualTo("/v2/rate/" + baseCurrency.toLowerCase(java.util.Locale.ROOT) + "/"
+							+ quoteCurrency.toLowerCase(java.util.Locale.ROOT)))
+					.withQueryParam("date", WireMock.equalTo(date.toString()))
+					.willReturn(WireMock.okJson("{\"date\":\"%s\",\"base\":\"%s\",\"quote\":\"%s\",\"rate\":%s}"
+							.formatted(date.toString(), baseCurrency, quoteCurrency, rate.toPlainString()))));
+		}
+
+		/**
+		 * A pair the provider does not publish, which it answers with a 404. That is an
+		 * absence of data rather than a failure, and it is what the paid provider's
+		 * 1-year history limit looks like from the outside.
+		 */
+		public void frankfurterWithoutRate(String baseCurrency, String quoteCurrency, LocalDate date) {
+			this.server.stubFor(WireMock
+					.get(WireMock.urlPathEqualTo("/v2/rate/" + baseCurrency.toLowerCase(java.util.Locale.ROOT) + "/"
+							+ quoteCurrency.toLowerCase(java.util.Locale.ROOT)))
+					.withQueryParam("date", WireMock.equalTo(date.toString())).willReturn(WireMock.notFound()));
+		}
+
+		/**
+		 * The currency list, with retired codes deliberately mixed in. The live list
+		 * carries about eighty of them — {@code DEM}, {@code FRF}, {@code RUR} — so the
+		 * filtering is the part worth stubbing: an adapter that imported them would add
+		 * currencies that no longer exist.
+		 */
+		public void frankfurterCurrencies(boolean withRetired) {
+			List<String> rows = new ArrayList<>(
+					List.of("{\"iso_code\":\"USD\",\"name\":\"United States Dollar\",\"start_date\":\"1948-06-21\"}",
+							"{\"iso_code\":\"KZT\",\"name\":\"Kazakhstani Tenge\",\"start_date\":\"1993-12-16\"}",
+							"{\"iso_code\":\"RUB\",\"name\":\"Russian Ruble\",\"start_date\":\"1998-01-02\"}"));
+			if (withRetired) {
+				rows.add(
+						"{\"iso_code\":\"DEM\",\"name\":\"German Mark\",\"start_date\":\"1948-06-21\",\"end_date\":\"2002-02-28\"}");
+				rows.add(
+						"{\"iso_code\":\"RUR\",\"name\":\"Russian Ruble (1991)\",\"start_date\":\"1993-01-04\",\"end_date\":\"1998-01-02\"}");
+			}
+			stubCurrencies(rows);
+		}
+
+		/**
+		 * The symbols the fallback adapter actually asked for.
+		 */
+		public List<String> frankfurterRequestedPairs() {
+			return this.server
+					.findAll(WireMock.getRequestedFor(WireMock.urlPathMatching("^/v2/rate/[a-z]{3}/[a-z]{3}$")))
+					.stream().map((request) -> request.getUrl().substring("/v2/rate/".length()).split("\\?")[0])
+					.toList();
+		}
+
+		/**
+		 * An empty paid-provider list, which is what a provider with no currency
+		 * endpoint looks like. With this registered the composite has to fall through
+		 * to the fallback, which is the only way to reach Frankfurter's list from a
+		 * suite that configures the paid one.
+		 */
+		public void paidProviderPublishesNothing() {
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/symbol_search"))
+					.willReturn(WireMock.okJson("{\"data\":[]}")));
+		}
+
+		/**
+		 * The currency list, built from rows so a scenario can say exactly which codes
+		 * are present and which are retired. The live list mixes in about eighty dead
+		 * codes, so the filtering is the part worth controlling.
+		 */
+		public void stubCurrencies(List<String> rows) {
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/v2/currencies"))
+					.willReturn(WireMock.okJson("[" + String.join(",", rows) + "]")));
 		}
 
 		/**

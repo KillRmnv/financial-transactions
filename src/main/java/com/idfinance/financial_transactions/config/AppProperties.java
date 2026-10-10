@@ -39,7 +39,22 @@ public record AppProperties(BigDecimal defaultLimitSum, ZoneId monthTimezone, in
 	 *            pause between attempts
 	 */
 	public record Rates(String source, String baseUrl, String apiKey, Duration connectTimeout, Duration readTimeout,
-			int attempts, Duration retryBackoff) {
+			int attempts, Duration retryBackoff, Frankfurter frankfurter) {
+
+		/**
+		 * The fallback provider.
+		 *
+		 * <p>
+		 * No key and no quota, which is why it is a single URL: there is nothing else
+		 * to configure about it.
+		 *
+		 * @param baseUrl
+		 *            defaults to the public instance; point it at a self-hosted one to
+		 *            keep the requests off a third party
+		 */
+		public record Frankfurter(String baseUrl) {
+		}
+
 	}
 
 }
