@@ -45,6 +45,11 @@
 		<resilience4j.version>2.4.0</resilience4j.version>
 		<!-- Built against Spring 7.0.9, which is exactly what the Boot 4.0.8 parent pulls. -->
 		<cucumber.version>8.0.4</cucumber.version>
+		<!-- Not managed by the Boot parent. Built against Spring 7.0.8, one patch behind the
+		     7.0.9 the parent pulls, which is the usual relationship between a library's build and
+		     the framework it is tested against. Keeps the daily sweep to one instance across a
+		     horizontally scaled deployment. -->
+		<shedlock.version>7.9.0</shedlock.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -81,6 +86,20 @@
 			<groupId>io.github.resilience4j</groupId>
 			<artifactId>resilience4j-ratelimiter</artifactId>
 			<version>${resilience4j.version}</version>
+		</dependency>
+		<!-- One scheduled task across the deployment rather than one per instance: without it two
+		     replicas both sweep at 07:00 and the provider is paid twice for the same rate. The
+		     JDBC provider rather than the Redis one because the lock table belongs with the data it
+		     protects, and Redis is a soft dependency here by decision. -->
+		<dependency>
+			<groupId>net.javacrumbs.shedlock</groupId>
+			<artifactId>shedlock-spring</artifactId>
+			<version>${shedlock.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>net.javacrumbs.shedlock</groupId>
+			<artifactId>shedlock-provider-jdbc-template</artifactId>
+			<version>${shedlock.version}</version>
 		</dependency>
 		<!-- Retries the exchange rate provider, which the specification describes as slow and paid for. -->
 		<dependency>
@@ -207,6 +226,20 @@
 
 	<build>
 		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<!-- Seven Spring contexts, each booting its own PostgreSQL and Redis. Started in
+					     sequence that is fourteen container startups in a row; started together it is
+					     seven. Set here rather than in src/test/resources because a properties file
+					     there would take precedence over src/main/resources/application.yml, and
+					     nothing in the tests may shadow the application's own configuration. -->
+					<systemPropertyVariables>
+						<spring.testcontainers.beans.startup>parallel</spring.testcontainers.beans.startup>
+					</systemPropertyVariables>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>

@@ -55,6 +55,8 @@ public class ExchangeRateService {
 
 	private final RateCache rateCache;
 
+	private final RateFetchCoordinator rateFetchCoordinator;
+
 	/**
 	 * Converts an amount into the ledger currency for the day the transaction
 	 * happened, not the day it arrived.
@@ -122,10 +124,6 @@ public class ExchangeRateService {
 						this.currencyRateRepository.findLatestOnOrBefore(currency, rateDate))
 				.flatMap(Optional::stream).map(rate -> ExchangeRate.from(rate, this.ledgerPolicy.currencyCode()))
 				.filter(ExchangeRate::effectiveRateIsPositive).findFirst();
-		// Only a rate that was actually resolved is worth remembering: caching the
-		// absence of one
-		// would keep sending transactions to the paid provider after the sweep has
-		// published it.
 		found.ifPresent(
 				rate -> this.rateCache.put(currency.getCode(), this.ledgerPolicy.currencyCode(), rateDate, rate));
 		return found;
@@ -135,7 +133,9 @@ public class ExchangeRateService {
 		String ledger = this.ledgerPolicy.currencyCode();
 		log.debug("No stored rate for {} on {}; asking {}", currency.getCode(), rateDate, this.ratesProvider.name());
 		try {
-			ExchangeRate fetched = this.ratesProvider.rateFor(currency.getCode(), ledger, rateDate);
+			ExchangeRate fetched = this.rateFetchCoordinator.rateFor(currency.getCode(), ledger, rateDate,
+					() -> Optional.ofNullable(this.ratesProvider.rateFor(currency.getCode(), ledger, rateDate)))
+					.orElse(null);
 			if (fetched == null) {
 				log.warn("The provider has no rate for {}/{} on {}", currency.getCode(), ledger, rateDate);
 				return Optional.empty();

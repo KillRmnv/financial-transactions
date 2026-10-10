@@ -1,6 +1,7 @@
 package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.config.LedgerPolicy;
+import com.idfinance.financial_transactions.config.SchedulerLockConfig;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.CurrencyPair;
@@ -8,16 +9,20 @@ import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyPairRepository;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -77,22 +82,37 @@ public final class ScheduledRatesFetcher {
 
 	private final MetricsRecorder metricsRecorder;
 
+	private final RateFetchCoordinator rateFetchCoordinator;
+
+	/**
+	 * How long one currency may take before the sweep gives up on it. Derived from the provider's own
+	 * timeouts rather than guessed: three attempts with a pause between them, and a margin for the
+	 * retry.
+	 */
+	private final Duration sweepTimeout;
+
 	@Scheduled(cron = "0 0 ${app.scheduled-fetch-hour} * * *", zone = "${app.month-timezone}")
+	@SchedulerLock(name = SchedulerLockConfig.Names.DAILY_RATES, lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
 	public void refreshDaily() {
-		LocalDate today = LocalDate.now(this.clock);
+		// The first of the month, not today. TransactionService asks for a rate for occurredMonth,
+		// which is the first day of the month the transaction belongs to, so a rate stored under any
+		// other date is found by neither findForDay nor findLatestOnOrBefore and the next transaction of
+		// that month goes to the provider anyway. Verified on a live database: a rate stored for the
+		// 10th is invisible to a transaction whose month starts on the 1st.
+		LocalDate rateDate = LocalDate.now(this.clock).withDayOfMonth(1);
 		Instant startedAt = Instant.now(this.clock);
 
 		List<Currency> bases = trackedCurrencies();
 		if (bases.isEmpty()) {
-			log.info("No active currencies to refresh for {}", today);
+			log.info("No active currencies to refresh for {}", rateDate);
 			return;
 		}
 
 		String quote = this.ledgerPolicy.currencyCode();
-		log.info("Refreshing {} currencies against {} for {} from {}", bases.size(), quote, today,
+		log.info("Refreshing {} currencies against {} for {} from {}", bases.size(), quote, rateDate,
 				this.ratesProvider.name());
 
-		Map<String, ExchangeRate> fetched = fetchConcurrently(bases, quote, today);
+		Map<String, ExchangeRate> fetched = fetchConcurrently(bases, quote, rateDate);
 		storeAll(fetched);
 		this.metricsRecorder.sweepCompleted(Duration.between(startedAt, Instant.now(this.clock)), fetched.size());
 	}
@@ -117,10 +137,16 @@ public final class ScheduledRatesFetcher {
 			var tasks = bases.stream()
 					.map(base -> CompletableFuture.supplyAsync(() -> fetch(base, quote, date), executor)).toList();
 			for (var task : tasks) {
-				// get() after submitting everything keeps the whole batch in flight; joining
-				// inside the
+				// get() after submitting everything keeps the whole batch in flight; joining inside the
 				// loop above would serialise exactly what this method exists to parallelise.
-				var result = task.join();
+				//
+				// Bounded, unlike a plain join(). The provider has a read timeout, so a single call
+				// cannot hang forever — but a virtual thread waiting on a task whose supplier is
+				// blocked elsewhere can, and a sweep that never returns holds a scheduler slot and a
+				// ShedLock lease for good. A currency that misses the deadline is dropped here and
+				// recalculated by the next sweep, which is the same bargain fetch() already makes on
+				// a provider error.
+				var result = await(task, this.sweepTimeout);
 				if (result != null) {
 					fetched.put(result.currencyCode(), result.rate());
 				}
@@ -129,10 +155,33 @@ public final class ScheduledRatesFetcher {
 		return fetched;
 	}
 
+	private Fetched await(CompletableFuture<Fetched> task, Duration timeout) {
+		try {
+			return task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+		}
+		catch (TimeoutException ex) {
+			log.warn("A currency did not answer within {} and was dropped from this sweep", timeout);
+			task.cancel(true);
+			return null;
+		}
+		catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			return null;
+		}
+		catch (java.util.concurrent.ExecutionException ex) {
+			log.warn("A currency failed during this sweep: {}", ex.getCause() != null ? ex.getCause() : ex);
+			return null;
+		}
+	}
+
 	private Fetched fetch(Currency base, String quote, LocalDate date) {
 		String code = base.getCode();
 		try {
-			ExchangeRate rate = this.ratesProvider.rateFor(code, quote, date);
+			// Through the coordinator for the same reason the transaction path is: a transaction
+			// arriving while the sweep is asking pays for nothing if it can join this call instead.
+			Optional<ExchangeRate> answer = this.rateFetchCoordinator.rateFor(code, quote, date,
+					() -> Optional.ofNullable(this.ratesProvider.rateFor(code, quote, date)));
+			ExchangeRate rate = answer.orElse(null);
 			if (rate == null) {
 				log.info("No {} published for {} on {}", quote, code, date);
 				return null;
