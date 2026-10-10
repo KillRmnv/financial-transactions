@@ -33,7 +33,9 @@ public final class MetricsRecorder {
 
 	private static final String RATE_LOOKUP = "financial.rates.lookup";
 
-	private static final String SWEEP = "financial.rates.sweep";
+	private static final String SWEEP_DURATION = "financial.rates.sweep.duration";
+
+	private static final String SWEEP_CURRENCIES = "financial.rates.sweep.currencies";
 
 	private static final String LIMITS_INSTALLED = "financial.limits.installed";
 
@@ -76,15 +78,27 @@ public final class MetricsRecorder {
 	}
 
 	/**
+	 * Records the outcome of one sweep.
+	 *
+	 * <p>
+	 * <strong>Two meters, two names.</strong> They used to share one, and
+	 * Micrometer accepts it — the Prometheus exposition then emits
+	 * {@code financial_rates_sweep_total} for the counter and
+	 * {@code financial_rates_sweep_seconds_*} for the timer, verified against the
+	 * real registry. It works and it is a trap: a dashboard querying
+	 * {@code financial_rates_sweep} gets neither series whole, and an empty panel
+	 * is indistinguishable from a sweep that never ran. That is the same failure
+	 * Micrometer's own {@code hikaricp.*} prefix causes, and it is silent.
+	 *
 	 * @param duration
 	 *            wall clock time of the whole sweep
 	 * @param currencies
 	 *            how many currencies were refreshed
 	 */
 	public void sweepCompleted(Duration duration, int currencies) {
-		Timer.builder(SWEEP).publishPercentileHistogram().register(this.meterRegistry).record(duration.toMillis(),
-				java.util.concurrent.TimeUnit.MILLISECONDS);
-		Counter.builder(SWEEP).tag("outcome", "currencies").register(this.meterRegistry).increment(currencies);
+		Timer.builder(SWEEP_DURATION).publishPercentileHistogram().register(this.meterRegistry)
+				.record(duration.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+		Counter.builder(SWEEP_CURRENCIES).register(this.meterRegistry).increment(currencies);
 	}
 
 	public void limitInstalled(String category) {
