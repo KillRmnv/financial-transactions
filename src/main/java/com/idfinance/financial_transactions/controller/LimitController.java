@@ -85,13 +85,22 @@ public final class LimitController {
 		return ResponseEntity.status(HttpStatus.CREATED).body(body);
 	}
 
-	@Operation(summary = "List the limits of an account", description = "Returns every limit installed for the account, each with what has been spent "
-			+ "against it in the current month.")
+	@Operation(summary = "List the limits of an account", description = """
+			Returns every limit of the account, each with what has been spent against it in the current month.
+
+			`expense_category` narrows the report to one category. Both categories are always answered:
+			a category nobody has installed a limit for is reported as the automatic 1000 USD fallback, with
+			`limitDatetime` null and `limitDefault` true, because the specification keeps a limit per
+			category and takes an unset one as 1000 — whether or not the account has ever spent on it. An
+			omitted category from the list would read as "no limit applies there".""")
 	@ApiResponse(responseCode = "200", description = "The limits, newest first")
+	@ApiResponse(responseCode = "404", description = "The category is not one of `product` or `service`", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@GetMapping("/limits")
 	List<LimitResponse> findAll(
-			@Parameter(description = "The account to list limits for", example = "0000000123") @RequestParam("account_from") String accountFrom) {
-		return reportingService.limitsOf(accountFrom).stream()
+			@Parameter(description = "The account to list limits for", example = "0000000123") @RequestParam("account_from") String accountFrom,
+
+			@Parameter(description = "Narrow to one category. Omit for every category", example = "product") @RequestParam(name = "expense_category", required = false) String expenseCategory) {
+		return reportingService.limitsOf(accountFrom, expenseCategory).stream()
 				.map(row -> this.limitMapper.toResponse(accountFrom, row, this.ledgerPolicy)).toList();
 	}
 
@@ -99,14 +108,21 @@ public final class LimitController {
 			Each row carries `limitSum`, `limitDatetime` and `limitCurrencyShortname` for the limit the
 			flag was actually computed against, which is not necessarily the limit installed today.
 			`limitDatetime` is null for the automatic 1000 USD fallback, which has no installation
-			event of its own.""")
+			event of its own.
+
+			`expense_category` narrows the report to one category, and is the same optional filter
+			`GET /limits` takes.""")
 	@ApiResponse(responseCode = "200", description = "The exceeded transactions, oldest first")
+	@ApiResponse(responseCode = "404", description = "The category is not one of `product` or `service`", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@GetMapping("/limits/exceeded")
 	List<TransactionWithLimitResponse> exceeded(
 			@Parameter(description = "The account to report on", example = "0000000123") @RequestParam("account_from") String accountFrom,
 
+			@Parameter(description = "Narrow to one category. Omit for every category", example = "product") @RequestParam(name = "expense_category", required = false) String expenseCategory,
+
 			@Parameter(description = "First day of the month to report. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01") @RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
-		return reportingService.exceededInMonth(accountFrom, month).stream().map(this::toResponse).toList();
+		return reportingService.exceededInMonth(accountFrom, expenseCategory, month).stream().map(this::toResponse)
+				.toList();
 	}
 
 	@Operation(summary = "List the accepted currency codes", description = """

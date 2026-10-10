@@ -46,43 +46,66 @@ public interface ExpenseLimitRepository extends JpaRepository<ExpenseLimit, Long
 	 * in one query.
 	 *
 	 * <p>
+	 * Driven by {@code expense_category} rather than by {@code expense_limit},
+	 * which is the whole difference between this report and the one it replaced. It
+	 * used to enumerate the rows that existed, so a client who had never spent on
+	 * {@code service} was told about one category, and the omission read as "no
+	 * limit applies there" — while the first transaction in that category would in
+	 * fact be measured against the standing 1000 USD. The specification keeps the
+	 * limit per category and takes an unset one as 1000, so the category exists
+	 * whether or not a row was ever written for it.
+	 *
+	 * <p>
+	 * A category with no row comes back as the standing default: the amount and the
+	 * ledger currency are coalesced in, {@code created_at} and {@code id} stay
+	 * null, and the service reads that null as "the automatic fallback" exactly as
+	 * it reads the epoch. No row is written to make it true. Both defaults are
+	 * parameters because {@code app.default-limit-sum} and
+	 * {@code app.ledger.currency-code} are configuration, and a literal here would
+	 * outlive them.
+	 *
+	 * <p>
 	 * The month's total is a grouped subquery rather than a second round trip per
 	 * row: asking for it once per limit is an N+1 that grows with the number of
 	 * limits, and the number of limits grows every time a client raises one.
 	 * Aggregating once is also the shape the specification asks for, and it is the
-	 * only one that stays a single statement as an account's history grows.
+	 * only one that stays a single statement as an account's history grows. It
+	 * joins on the account rather than on {@code l.account_from} so that a category
+	 * with no limit still reports what was spent against it.
 	 *
 	 * <p>
-	 * {@code left join} rather than {@code inner}: an account with a limit and no
-	 * transactions yet is a normal state, and an inner join would hide its limits
-	 * exactly when the client is asking what they are.
+	 * {@code categoryCode} narrows the report to one category, or null for all of
+	 * them. The comparison is inside the query rather than a filter over the
+	 * result: the rows are ordered by installation date, so a category asked for by
+	 * name is answered by the same statement and in the same position it would have
+	 * had.
 	 *
-	 * <p>
-	 * The category and the currency are joined for their codes rather than looked
-	 * up per row, for the same reason. A projection has no session to resolve a
-	 * {@code ManyToOne} lazily, so an entity-returning query here would be the same
-	 * N+1 in a different hat.
+	 * @param categoryCode
+	 *            the category to report on, or null for every category
 	 */
 	@Query(value = """
-			select l.id                    as id,
-			       cat.code                 as expenseCategory,
-			       l.amount                 as limitSum,
-			       l.created_at             as limitDatetime,
-			       cur.code                 as currencyShortname,
-			       coalesce(spent.total, 0) as spent
-			from expense_limit l
-			join expense_category cat on cat.id = l.category_id
-			join currency cur on cur.id = l.currency_id
+			select l.id                                 as id,
+			       cat.code                              as expenseCategory,
+			       coalesce(l.amount, :defaultSum)       as limitSum,
+			       l.created_at                          as limitDatetime,
+			       coalesce(cur.code, :ledgerCurrency)   as currencyShortname,
+			       coalesce(spent.total, 0)              as spent
+			from expense_category cat
+			left join expense_limit l
+			       on l.account_from = :accountFrom and l.category_id = cat.id
+			left join currency cur on cur.id = l.currency_id
 			left join (
 			    select t.account_from, t.category_id, sum(t.ledger_sum) as total
 			    from expense_transaction t
 			    where t.occurred_month = :month
 			    group by t.account_from, t.category_id
-			) spent on spent.account_from = l.account_from and spent.category_id = l.category_id
-			where l.account_from = :accountFrom
-			order by l.created_at desc, l.id desc
+			) spent on spent.account_from = :accountFrom and spent.category_id = cat.id
+			where (:categoryCode is null or cat.code = :categoryCode)
+			order by l.created_at desc nulls last, l.id desc nulls last
 			""", nativeQuery = true)
-	List<LimitReportRow> reportForAccount(@Param("accountFrom") String accountFrom, @Param("month") LocalDate month);
+	List<LimitReportRow> reportForAccount(@Param("accountFrom") String accountFrom, @Param("month") LocalDate month,
+			@Param("categoryCode") String categoryCode, @Param("defaultSum") BigDecimal defaultSum,
+			@Param("ledgerCurrency") String ledgerCurrency);
 
 	/**
 	 * Creates the standing default limit, unless one already exists.

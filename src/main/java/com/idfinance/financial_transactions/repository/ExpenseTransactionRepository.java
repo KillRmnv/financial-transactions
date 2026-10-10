@@ -37,15 +37,21 @@ public interface ExpenseTransactionRepository extends JpaRepository<ExpenseTrans
 	 * The join happens at the reporting stage against the stored {@code limitId},
 	 * not against a date comparison: resolving the limit by date would report the
 	 * wrong limit for past transactions as soon as a new one is installed.
+	 *
+	 * @param categoryId
+	 *            narrows the report to one category, or null for every category —
+	 *            the same null-means-everything the limit report uses, so a caller
+	 *            without a filter and one without a category do the same thing
 	 */
 	@Query("""
 			select t from ExpenseTransaction t
 			where t.accountFrom = :accountFrom
 			  and t.occurredMonth = :month
 			  and t.limitExceeded = true
+			  and (:categoryId is null or t.categoryId = :categoryId)
 			order by t.occurredAt asc, t.id asc
 			""")
 	List<ExpenseTransaction> findExceededInMonth(@Param("accountFrom") String accountFrom,
-			@Param("month") LocalDate month);
+			@Param("month") LocalDate month, @Param("categoryId") Long categoryId);
 
 }
