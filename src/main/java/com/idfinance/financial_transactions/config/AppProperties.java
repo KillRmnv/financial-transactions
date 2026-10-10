@@ -3,6 +3,7 @@ package com.idfinance.financial_transactions.config;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -16,32 +17,86 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param scheduledFetchHour
  *            hour of the daily refresh, in {@code monthTimezone}
  * @param rates
- *            settings of the external rates provider
+ *            settings shared by every provider, and the providers themselves
  */
 @ConfigurationProperties(prefix = "app")
 public record AppProperties(BigDecimal defaultLimitSum, ZoneId monthTimezone, int scheduledFetchHour, Rates rates) {
 
 	/**
-	 * Settings of the external rates provider.
+	 * Settings that concern every provider, plus the providers themselves.
 	 *
-	 * @param source
-	 *            identifier written into every stored rate, so a change of provider
-	 *            shows up in the data rather than having to be guessed at
-	 * @param apiKey
-	 *            provider key, supplied through the environment and never committed
-	 * @param connectTimeout
-	 *            how long to wait for the connection
-	 * @param readTimeout
-	 *            how long to wait for the response
-	 * @param attempts
-	 *            total attempts before the transaction is rejected, at least 1
-	 * @param retryBackoff
-	 *            pause between attempts
-	 * @param fallbackDays
-	 *            how far to look in the past
+	 * <p>
+	 * Nothing in here belongs to one provider. A provider's URL, key and name live
+	 * in its own block under {@code providers}, and the numbers that govern how any
+	 * provider is called — how long it may take, how many attempts, how far back
+	 * the paid one looks for the last close before a day with none — sit here
+	 * because they are one policy across all of them.
+	 *
+	 * <p>
+	 * The split is the whole reason this is a map. Adding a provider used to mean a
+	 * new field or a new nested record here, a new branch in the conditional on the
+	 * chain, a new pair of properties to blank in every suite, and a longer
+	 * positional argument list in the test configuration. Now it means one block in
+	 * {@code application.yml} with a key that appears nowhere else, and a class
+	 * that reads it.
 	 */
-	public record Rates(String source, String baseUrl, String apiKey, Duration connectTimeout, Duration readTimeout,
-			int attempts, Duration retryBackoff, Frankfurter frankfurter, int fallbackDays) {
+	public record Rates(Duration connectTimeout, Duration readTimeout, int attempts, Duration retryBackoff,
+			int fallbackDays, Map<String, Provider> providers) {
+
+		/**
+		 * One provider: where it is, what it is called, and how it is spelled.
+		 *
+		 * <p>
+		 * The map key is the name: that is what lands in {@code currency_rate.source}.
+		 * An operator who runs a sandbox wants stored rows saying
+		 * {@code twelvedata-sandbox} rather than {@code twelvedata}, so {@code source}
+		 * overrides it — and when it is absent the key is used, which is why there is
+		 * no second place to keep the two in step.
+		 *
+		 * <p>
+		 * {@code api-key} is optional on purpose. A provider without a key can still be
+		 * asked — a self-hosted Frankfurter behind a proxy, an internal cache — and one
+		 * that refuses an empty key fails as a provider that answers 401, which the
+		 * adapter turns into "no rate". Nothing here forces a key that does not belong
+		 * to the provider.
+		 *
+		 * <p>
+		 * A blank {@code baseUrl} is not an error: it means the provider is not
+		 * configured, which is how one is switched off without deleting its block, and
+		 * the condition that registers its adapter simply does not match. A URL that is
+		 * present and wrong fails loudly at the first request, which is the right way
+		 * to fail: the adapter retries it three times and names the address it could
+		 * not reach.
+		 *
+		 * @param baseUrl
+		 *            where the provider is; empty means not configured
+		 * @param apiKey
+		 *            credential sent as the provider expects it; empty for the ones
+		 *            that take none
+		 * @param order
+		 *            who is asked first, lowest first. Gaps are deliberate: a new
+		 *            provider slots between existing ones without renumbering anything,
+		 *            and an operator who wants the free one asked first swaps two
+		 *            numbers here rather than in code
+		 * @param source
+		 *            the name written into {@code currency_rate.source}; blank means
+		 *            the map key, which is the normal case
+		 */
+		public record Provider(String baseUrl, String apiKey, int order, String source) {
+
+			/** The same settings, with a blank name replaced by the map key. */
+			Provider named(String key) {
+				return (this.source == null || this.source.isBlank())
+						? new Provider(this.baseUrl, this.apiKey, this.order, key)
+						: this;
+			}
+
+			/** What is written into {@code currency_rate.source} for a rate from here. */
+			public String name() {
+				return (this.source == null || this.source.isBlank()) ? "" : this.source;
+			}
+
+		}
 
 		/**
 		 * Checks the two settings that are meaningless at zero.
@@ -66,20 +121,15 @@ public record AppProperties(BigDecimal defaultLimitSum, ZoneId monthTimezone, in
 			if (fallbackDays < 1) {
 				throw new IllegalArgumentException("app.rates.fallback-days must be at least 1, was " + fallbackDays);
 			}
-		}
-
-		/**
-		 * The fallback provider.
-		 *
-		 * <p>
-		 * No key and no quota, which is why it is a single URL: there is nothing else
-		 * to configure about it.
-		 *
-		 * @param baseUrl
-		 *            defaults to the public instance; point it at a self-hosted one to
-		 *            keep the requests off a third party
-		 */
-		public record Frankfurter(String baseUrl) {
+			// Every entry is stamped with its key, so a provider whose block carries no
+			// `source` is still called by that key. Doing it here rather than at each
+			// read is what lets `name()` be the single answer to "who is this", which is
+			// the same string the chain sorts by and the adapter logs.
+			Map<String, Provider> stamped = new java.util.LinkedHashMap<>();
+			if (providers != null) {
+				providers.forEach((name, provider) -> stamped.put(name, provider.named(name)));
+			}
+			providers = Map.copyOf(stamped);
 		}
 
 	}

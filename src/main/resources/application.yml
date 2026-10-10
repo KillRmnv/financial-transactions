@@ -80,21 +80,46 @@ app:
   scheduled-fetch-hour: 7
 
   rates:
-    source: ${RATES_SOURCE:twelvedata}
-    # Empty means no external provider is configured and rates are read from the database only.
-    base-url: ${RATES_API_BASE_URL:}
-    api-key: ${RATES_API_KEY:}
+    # Shared by every provider: how long one call may take, how many attempts, and
+    # how far back to look when a day has no close of its own. A per-provider
+    # override would be a different decision — see the note on `providers` below.
     connect-timeout: 3s
     read-timeout: 5s
     attempts: 3
     retry-backoff: 500ms
     fallback-days: 10
 
-    # The fallback, asked only when the provider above has no answer. No key and no quota,
-    # which is why this is one URL and nothing else — see the note on the two providers in
-    # docs/assumptions.md. Empty switches it off, leaving the paid provider as the only one.
-    frankfurter:
-      base-url: ${FRANKFURTER_API_BASE_URL:https://api.frankfurter.dev}
+    # The providers themselves. Adding one is a key here, a class that reads it, and
+    # nothing else: the chain is conditional on any provider being present rather
+    # than on a list of names, and the order lives in the block rather than in the
+    # classes, so a new provider needs no number reassigned and no condition edited.
+    #
+    # Each block is one provider:
+    #   base-url  required, and what registers it. Empty means the provider is not
+    #             configured at all — there is no separate `enabled` flag, because a
+    #             second flag that can disagree with the first is not a feature.
+    #   api-key   optional. A provider that takes none is simply left without one,
+    #             and a self-hosted one behind a proxy works the same way.
+    #   source    what lands in `currency_rate.source`. Defaults to the key, which
+    #             is enough for any deployment where the provider's identity is
+    #             its identity.
+    #   order     who is asked first, lowest first. The gap between ten and twenty
+    #             is there so a new provider slots in without renumbering its
+    #             neighbours.
+    providers:
+      twelvedata:
+        base-url: ${RATES_API_BASE_URL:}
+        api-key: ${RATES_API_KEY:}
+        source: ${RATES_SOURCE:twelvedata}
+        order: 10
+
+      # The fallback, asked only when the one above has no answer. No key and no
+      # quota, which is why this block carries one line of its own — see the note
+      # on the two providers in docs/assumptions.md. Point it at a self-hosted
+      # instance to keep the requests off a third party.
+      frankfurter:
+        base-url: ${FRANKFURTER_API_BASE_URL:https://api.frankfurter.dev}
+        order: 20
 
   # The currencies the daily sweep prefetches rates for live in the currency_pair table, not here:
   # an operator must be able to add or retire one without a release, and every call to the

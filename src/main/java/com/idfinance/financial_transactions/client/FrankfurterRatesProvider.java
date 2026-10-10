@@ -3,6 +3,7 @@ package com.idfinance.financial_transactions.client;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.service.ConditionalOnProviderConfigured;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import io.github.resilience4j.core.IntervalFunction;
 import io.github.resilience4j.retry.Retry;
@@ -13,8 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.core.annotation.Order;
+
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -56,18 +56,16 @@ import org.springframework.web.client.RestClientResponseException;
  * longer exist.
  */
 @Component
-@Order(2)
-@ConditionalOnProperty(name = "app.rates.frankfurter.base-url", matchIfMissing = true)
+@ConditionalOnProviderConfigured("frankfurter")
 @Slf4j
 public final class FrankfurterRatesProvider implements RatesProvider {
 
 	/**
-	 * What lands in {@code currency_rate.source} for a rate that came from here. A
-	 * named constant because the composite reports it when this provider is the
-	 * only one configured, and a string literal in two places would be two things
-	 * to keep in step.
+	 * Which block of {@code app.rates.providers} this adapter reads. The provider
+	 * name is the map key, so it appears exactly twice — here and in
+	 * {@code application.yml} — and nowhere else in the code.
 	 */
-	public static final String NAME = "frankfurter";
+	private static final String PROVIDER = "frankfurter";
 
 	private final AppProperties properties;
 
@@ -75,8 +73,13 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 
 	public FrankfurterRatesProvider(AppProperties properties) {
 		this.properties = properties;
-		this.client = RestClient.builder().baseUrl(properties.rates().frankfurter().baseUrl())
+		this.client = RestClient.builder().baseUrl(settings().baseUrl())
 				.requestFactory(requestFactory(properties.rates())).build();
+	}
+
+	/** This provider's settings, or a null when its block is absent. */
+	private AppProperties.Rates.Provider settings() {
+		return this.properties.rates().providers().get(PROVIDER);
 	}
 
 	private static ClientHttpRequestFactory requestFactory(AppProperties.Rates rates) {
@@ -88,7 +91,7 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 
 	@Override
 	public String name() {
-		return NAME;
+		return PROVIDER;
 	}
 
 	/**

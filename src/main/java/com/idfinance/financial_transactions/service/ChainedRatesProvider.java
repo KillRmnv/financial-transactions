@@ -1,13 +1,16 @@
 package com.idfinance.financial_transactions.service;
 
+import com.idfinance.financial_transactions.config.AppProperties;
+import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Primary;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,21 +25,21 @@ import org.springframework.stereotype.Component;
  * {@code RatesProvider} is.
  *
  * <p>
- * Conditional on at least one provider URL being configured, which is what
- * keeps it out of the way in the suites that stub {@code RatesProvider}
- * in-process. A composite over a stub has nothing to fall back to, and marking
- * both it and the stub as {@code @Primary} is a context that refuses to start.
- * The stub contexts therefore leave both URLs empty rather than this bean being
+ * Conditional on at least one provider being configured, which is what keeps it
+ * out of the way in the suites that stub {@code RatesProvider} in-process. A
+ * composite over a stub has nothing to fall back to, and marking both it and
+ * the stub as {@code @Primary} is a context that refuses to start. The stub
+ * contexts therefore configure no provider at all rather than this bean being
  * conditionally absent by some subtler means.
  *
  * <p>
  * The order is deliberately significant and is a property of the deployment,
- * not of the code: the adapters are injected as an ordered stream and each one
- * is asked in turn. A deployment that wants the free provider asked first
- * removes the paid one's URL. Without {@code @Order} the order is the order the
- * component scanner happens to produce, which changes the day a class is
- * renamed — and a paid provider silently demoted to second costs money in a
- * direction nobody chose.
+ * not of the code: each provider carries its own {@code order} in its block,
+ * and they are asked in ascending order. A deployment that wants the free
+ * provider asked first swaps two numbers, and a new provider slots between
+ * existing ones without any neighbour being renumbered — a paid provider
+ * silently demoted to second costs money in a direction nobody chose, so the
+ * sequence is configuration and not a fact about the classes.
  *
  * <p>
  * The first answer wins, whatever kind it was: a rate, or an absence of one.
@@ -55,9 +58,15 @@ import org.springframework.stereotype.Component;
  * This class implements {@link RatesProvider} because everything that consumes
  * rates is written against that type, and the set of implementations is
  * conditional: a payment-less deployment runs {@code NoRatesProvider}, the
- * suites run in-process stubs, and this class only exists once a URL is
- * configured. Dropping it in favour of a concrete class would make every
- * consumer require a URL to be set before it would start.
+ * suites run in-process stubs, and this class only exists once at least one
+ * provider is configured. Dropping it in favour of a concrete class would make
+ * every consumer require a URL to be set before it would start.
+ *
+ * <p>
+ * The condition is {@link ProvidersConfigured} rather than an expression over
+ * the property names, for the reason that class exists: an expression would
+ * have to list every provider, so adding one would mean editing this class, and
+ * forgetting to would register an adapter nobody ever calls.
  *
  * <p>
  * For the same reason it injects {@code ObjectProvider<RatesProvider>} rather
@@ -75,15 +84,18 @@ import org.springframework.stereotype.Component;
  * publish comes back as null, not as an exception.
  */
 @Component
-@Order(1)
-@ConditionalOnExpression("'${app.rates.base-url:}' != '' or '${app.rates.frankfurter.base-url:}' != ''")
+@ConditionalOnBean(AppProperties.class)
+@Conditional(ProvidersConfigured.class)
 @Primary
 @Slf4j
 public final class ChainedRatesProvider implements RatesProvider {
 
 	private final ObjectProvider<RatesProvider> others;
 
-	public ChainedRatesProvider(ObjectProvider<RatesProvider> others) {
+	private final AppProperties properties;
+
+	public ChainedRatesProvider(AppProperties properties, ObjectProvider<RatesProvider> others) {
+		this.properties = properties;
 		this.others = others;
 	}
 
@@ -128,24 +140,44 @@ public final class ChainedRatesProvider implements RatesProvider {
 	}
 
 	/**
-	 * Who is asked first. Ordering is settled by {@code @Order} on the adapters.
+	 * Who is asked first. The order is a property of the deployment rather than of
+	 * the classes: it lives in the provider's own block under
+	 * {@code app.rates.providers}, so an operator who wants the free provider asked
+	 * first swaps two numbers, and a new provider slots between existing ones
+	 * without any neighbour being renumbered.
 	 */
 	private RatesProvider head() {
 		return this.chain().get(0);
 	}
 
 	/**
-	 * Every other {@code RatesProvider} in the context, in order, without this one.
+	 * Every other {@code RatesProvider} in the context, in the order its block asks
+	 * for, without this one.
 	 *
 	 * <p>
-	 * Ordered rather than in registration order, and {@code orderedStream()} is
-	 * what honours {@code @Order} on the adapters. Dropping the bean that is asking
-	 * is by reference identity: the alternative is a sub-interface that exists for
-	 * nothing but narrowing a list, which is a type added to every adapter to solve
-	 * one injection point.
+	 * Sorted by the provider's own {@code order} rather than by
+	 * {@code ObjectProvider.orderedStream()}, because the sequence is deployment
+	 * configuration and not a fact about the class. A provider with no entry — a
+	 * stub, in a suite — sorts last, which is what a bean nobody configured should
+	 * do.
+	 *
+	 * <p>
+	 * Dropping the bean that is asking is by reference identity: the alternative is
+	 * a sub-interface that exists for nothing but narrowing a list, which is a type
+	 * added to every adapter to solve one injection point.
 	 */
 	private List<RatesProvider> chain() {
-		return this.others.orderedStream().filter(provider -> provider != this).toList();
+		Map<String, Integer> orders = new java.util.HashMap<>();
+		// Keyed by the name a provider answers to, not by the key it was configured
+		// under: a block may override its name — a sandbox deployment writes
+		// `twelvedata-sandbox` into currency_rate.source — and a map keyed by the
+		// configuration key would then miss every overridden entry and sort them all
+		// last, which puts the paid provider behind the free one for no visible
+		// reason.
+		this.properties.rates().providers().forEach((key, provider) -> orders.put(provider.name(), provider.order()));
+		return this.others.orderedStream().filter(provider -> provider != this).sorted(
+				java.util.Comparator.comparingInt(provider -> orders.getOrDefault(provider.name(), Integer.MAX_VALUE)))
+				.toList();
 	}
 
 }

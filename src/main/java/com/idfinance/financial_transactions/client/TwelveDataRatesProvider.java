@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.service.ConditionalOnProviderConfigured;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import io.github.resilience4j.core.IntervalFunction;
 import io.github.resilience4j.retry.Retry;
@@ -15,8 +16,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.core.annotation.Order;
+
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -47,8 +47,7 @@ import org.springframework.web.util.UriBuilder;
  *
  */
 @Component
-@Order(1)
-@ConditionalOnProperty(name = "app.rates.base-url")
+@ConditionalOnProviderConfigured("twelvedata")
 @Slf4j
 public final class TwelveDataRatesProvider implements RatesProvider {
 
@@ -73,9 +72,10 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	public TwelveDataRatesProvider(AppProperties properties, LedgerPolicy ledgerPolicy) {
 		this.properties = properties;
 		this.ledgerPolicy = ledgerPolicy;
+		AppProperties.Rates.Provider provider = settings();
 		AppProperties.Rates rates = properties.rates();
-		this.restClient = RestClient.builder().baseUrl(rates.baseUrl()).requestFactory(requestFactory(rates))
-				.defaultHeader("apikey", rates.apiKey()).build();
+		this.restClient = RestClient.builder().baseUrl(provider.baseUrl()).requestFactory(requestFactory(rates))
+				.defaultHeader("apikey", provider.apiKey() == null ? "" : provider.apiKey()).build();
 		this.retry = Retry.of("rates-provider", retryConfig(rates));
 	}
 
@@ -90,11 +90,37 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 
 	/**
 	 * The provider name is configuration, not a constant. It is written into
-	 * {@code currency_rate.source}, so it has to be set per deployment.
+	 * {@code currency_rate.source}, so it has to be set per deployment: a staging
+	 * instance talking to a sandbox and production talking to a paid tier must be
+	 * distinguishable in stored data.
 	 */
 	@Override
 	public String name() {
-		return this.properties.rates().source();
+		return source();
+	}
+
+	/**
+	 * Which block of {@code app.rates.providers} this adapter is. The only place
+	 * outside {@code application.yml} the provider's key appears, and it is here
+	 * because the class is that provider.
+	 */
+	private static final String PROVIDER = "twelvedata";
+
+	/** This provider's settings, which are empty until its block is configured. */
+	private AppProperties.Rates.Provider settings() {
+		return this.properties.rates().providers().get(PROVIDER);
+	}
+
+	/** The credential, sent as the provider expects it. */
+	private String apiKey() {
+		AppProperties.Rates.Provider provider = settings();
+		return provider == null ? "" : provider.apiKey();
+	}
+
+	/** What is written into {@code currency_rate.source} for a rate from here. */
+	private String source() {
+		AppProperties.Rates.Provider provider = settings();
+		return provider == null ? "none" : provider.name();
 	}
 
 	/**
@@ -117,8 +143,8 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 			return direct.get();
 		}
 
-		log.info("{} publishes no {}/{}, asking for the pair the other way round", this.properties.rates().source(),
-				baseCurrency, quoteCurrency);
+		log.info("{} publishes no {}/{}, asking for the pair the other way round", source(), baseCurrency,
+				quoteCurrency);
 		return askFor(quoteCurrency + "/" + baseCurrency, quoteCurrency, baseCurrency, date).map(ExchangeRate::inverted)
 				.orElse(null);
 	}
@@ -129,7 +155,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 */
 	private Optional<ExchangeRate> askFor(String symbol, String baseCurrency, String quoteCurrency, LocalDate date) {
 		return Optional.ofNullable(this.retry.executeSupplier(() -> {
-			log.debug("Asking {} for {}/{}", this.properties.rates().source(), symbol, date);
+			log.debug("Asking {} for {}/{}", source(), symbol, date);
 			return fetchOnce(symbol, baseCurrency, quoteCurrency, date);
 		}));
 	}
@@ -169,8 +195,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 		if (previous == null) {
 			return null;
 		}
-		log.debug("{} has no close for {} on {}, falling back to {}", this.properties.rates().source(), symbol, date,
-				previous);
+		log.debug("{} has no close for {} on {}, falling back to {}", source(), symbol, date, previous);
 		return new ExchangeRate(baseCurrency, quoteCurrency, date, null, previous, name());
 	}
 
@@ -221,17 +246,14 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 		try {
 			return this.restClient.get()
 					.uri(uriBuilder -> query.apply(uriBuilder.path("/time_series").queryParam("symbol", symbol)
-							.queryParam("interval", "1day").queryParam("apikey", this.properties.rates().apiKey()))
-							.build())
+							.queryParam("interval", "1day").queryParam("apikey", apiKey())).build())
 					.retrieve().body(TimeSeriesResponse.class);
 		} catch (HttpClientErrorException.NotFound ex) {
-			log.debug("{} has no symbol {}: {}", this.properties.rates().source(), symbol,
-					ex.getResponseBodyAsString());
+			log.debug("{} has no symbol {}: {}", source(), symbol, ex.getResponseBodyAsString());
 			return null;
 		} catch (HttpClientErrorException.BadRequest ex) {
 			if (ex.getResponseBodyAsString().contains(NO_DATA)) {
-				log.debug("{} has no data before the date asked for: {}", this.properties.rates().source(),
-						ex.getResponseBodyAsString());
+				log.debug("{} has no data before the date asked for: {}", source(), ex.getResponseBodyAsString());
 				return null;
 			}
 			throw ex;
@@ -289,17 +311,16 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 			response = this.restClient.get()
 					.uri(uriBuilder -> uriBuilder.path("/symbol_search").queryParam("symbol", ledger)
 							.queryParam("type", "Physical Currency").queryParam("outputsize", SEARCH_PAGE)
-							.queryParam("apikey", this.properties.rates().apiKey()).build())
+							.queryParam("apikey", apiKey()).build())
 					.retrieve().body(SymbolSearchResponse.class);
 		} catch (RestClientResponseException ex) {
-			log.warn("Could not list the pairs of {}: {} ({} {})", this.properties.rates().source(), ex.getMessage(),
+			log.warn("Could not list the pairs of {}: {} ({} {})", source(), ex.getMessage(),
 					ex.getStatusCode().value(), ex.getResponseBodyAsString());
 			return List.of();
 		}
 
 		if (response == null || response.data() == null || response.data().isEmpty()) {
-			log.warn("{} answered the currency search with no data; the lookup keeps what it has",
-					this.properties.rates().source());
+			log.warn("{} answered the currency search with no data; the lookup keeps what it has", source());
 			return List.of();
 		}
 		return response.data().stream().map(SymbolSearchResponse.Symbol::symbol)
