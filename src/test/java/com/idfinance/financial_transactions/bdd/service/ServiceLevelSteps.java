@@ -224,6 +224,28 @@ class ServiceLevelSteps {
 	 * this step every scenario above passes with a cache that never answers, which
 	 * is the failure a cache is most likely to have.
 	 */
+	/**
+	 * A counter over the accepted transactions, read back out of the registry.
+	 *
+	 * <p>
+	 * Summed over the meters the tag selects rather than read off the first,
+	 * because two calls with the same outcome and different providers are two
+	 * meters and {@code counter()} returns one of them.
+	 *
+	 * @param outcome
+	 *            {@code flagged}, {@code within_limit} or {@code uncalculated}
+	 * @param atLeast
+	 *            the smallest count that counts as evidence the path ran
+	 */
+	@Then("at least {int} transactions were accepted with the outcome {string}")
+	void atLeastTransactionsWereAcceptedWith(int atLeast, String outcome) {
+		double counted = this.meterRegistry.find("financial.transactions.accepted").tag("outcome", outcome).counters()
+				.stream().mapToDouble((counter) -> counter.count()).sum();
+
+		Assertions.assertThat(counted).as("transactions accepted as %s", outcome)
+				.isGreaterThanOrEqualTo((double) atLeast);
+	}
+
 	@Then("the rate was resolved from the cache at least once")
 	void theRateWasResolvedFromTheCache() {
 		Counter counter = this.meterRegistry.find("financial.rates.resolved").tag("source", "cache").counter();

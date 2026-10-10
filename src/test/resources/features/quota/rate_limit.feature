@@ -19,6 +19,7 @@ Feature: Request quotas
     Then the response is 429
     And the response carries a Retry-After header
     And the response is a problem of type "rate-limited"
+    And the "ingestion" quota refused at least 1 requests
 
   Scenario: The quota is per calling address, not per account
     When 3 transactions are posted for account "0000000456"

@@ -8,6 +8,7 @@ import io.cucumber.java.Before;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -45,6 +46,8 @@ class RateLimitSteps {
 
 	private final StoredWorldCleaner storedWorldCleaner;
 
+	private final MeterRegistry meterRegistry;
+
 	private String baseUrl;
 
 	private ResponseEntity<String> response;
@@ -57,6 +60,29 @@ class RateLimitSteps {
 		this.baseUrl = "http://localhost:" + this.environment.getProperty("local.server.port");
 		this.response = null;
 		this.responses.clear();
+	}
+
+	/**
+	 * The refusal counter, read back out of the registry the application writes to.
+	 *
+	 * <p>
+	 * The point of the scenario this step serves is that the 429 and the metric are
+	 * written by different code — the interceptor refuses, the recorder counts — so
+	 * a refusal that stopped being counted would leave every other quota scenario
+	 * green.
+	 *
+	 * @param expected
+	 *            how many refusals of the named quota to expect
+	 * @param quota
+	 *            the {@code app.rate-limits} block that refused
+	 */
+	@Then("the {string} quota refused at least {int} requests")
+	void theQuotaRefusedAtLeast(String quota, int expected) {
+		double counted = this.meterRegistry.find("financial.rate_limit.refused").tag("quota", quota).counters().stream()
+				.mapToDouble((counter) -> counter.count()).sum();
+
+		Assertions.assertThat(counted).as("requests refused by the %s quota", quota)
+				.isGreaterThanOrEqualTo((double) expected);
 	}
 
 	@Given("the ingestion quota is {int} requests per hour")
@@ -154,12 +180,14 @@ class RateLimitSteps {
 	@Autowired
 	public RateLimitSteps(RestClient.Builder restClientBuilder, Environment environment,
 			ExpenseTransactionRepository expenseTransactionRepository, ExpenseLimitRepository expenseLimitRepository,
-			CurrencyRateRepository currencyRateRepository, StoredWorldCleaner storedWorldCleaner) {
+			CurrencyRateRepository currencyRateRepository, StoredWorldCleaner storedWorldCleaner,
+			MeterRegistry meterRegistry) {
 		this.restClientBuilder = restClientBuilder;
 		this.environment = environment;
 		this.expenseTransactionRepository = expenseTransactionRepository;
 		this.expenseLimitRepository = expenseLimitRepository;
 		this.currencyRateRepository = currencyRateRepository;
 		this.storedWorldCleaner = storedWorldCleaner;
+		this.meterRegistry = meterRegistry;
 	}
 }

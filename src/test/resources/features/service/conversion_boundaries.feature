@@ -84,6 +84,10 @@ Feature: The boundaries of converting into the ledger currency
     When a transaction of "100" KZT was posted on "2022-01-05"
     Then 1 transactions are stored
     And the transaction of "2022-01-05" is stored without a flag
+    # The scenario above posts USD everywhere else, and a currency with no rate is the one path
+    # that never runs. It is also the one an operator needs to see: a counter that folded it into
+    # "within limit" would show a service quietly pricing nothing as a service pricing everything.
+    And at least 1 transactions were accepted with the outcome "uncalculated"
 
   Scenario: A provider that is down does not cost the transaction
     Given the rates provider fails

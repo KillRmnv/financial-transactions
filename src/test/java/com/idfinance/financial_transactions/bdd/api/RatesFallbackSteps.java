@@ -112,13 +112,6 @@ class RatesFallbackSteps {
 		this.lastQuote = quote;
 		this.lastDate = LocalDate.parse(isoDate);
 
-		// Inside a transaction because that is what production does: convert stores the
-		// rate it
-		// fetched, and store's upsert is a modifying query that needs one. Calling
-		// convert on its
-		// own answers "No active transaction for update or delete query", which says
-		// nothing
-		// about the provider.
 		this.lastConversion = this.transactionTemplate
 				.execute((status) -> this.exchangeRateService.convert(BigDecimal.ONE, currencyOf(base), this.lastDate));
 
@@ -179,8 +172,6 @@ class RatesFallbackSteps {
 		Assertions.assertThat(this.ratesStub.frankfurterRequestedPairs()).as("the pairs the fallback was asked for")
 				.contains(expectedPair.toLowerCase(Locale.ROOT));
 	}
-
-	// --- the currency list ---
 
 	@Given("the fallback publishes these currencies, including retired ones:")
 	void theFallbackPublishes(DataTable table) {
