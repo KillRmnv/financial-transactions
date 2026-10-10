@@ -68,7 +68,12 @@ public class ExchangeRateService {
 	public Conversion convert(BigDecimal amount, Currency currency, LocalDate rateDate) {
 		if (this.ledgerPolicy.isLedgerCurrency(currency.getCode())) {
 			this.metricsRecorder.rateResolved(SOURCE_IDENTITY, this.ledgerPolicy.currencyCode());
-			return new Conversion(this.ledgerPolicy.round(amount), BigDecimal.ONE, rateDate);
+			// No clock attached: a transaction in the ledger currency needs no rate, and
+			// `null` says exactly that. An earlier version returned `Instant.now()`, which
+			// read as "the rate for today" and corrupted the month attribution for
+			// transactions
+			// dated before today. The DTO field is therefore `rateDate`.
+			return new Conversion(amount, BigDecimal.ONE, rateDate);
 		}
 
 		Optional<ExchangeRate> stored = findCached(currency, rateDate);
@@ -90,7 +95,7 @@ public class ExchangeRateService {
 		this.metricsRecorder.rateResolved(source, this.ratesProvider.name());
 		log.debug("Converting {} {} at {} (rate {} from {})", amount, currency.getCode(), effective, rate.rateDate(),
 				this.ratesProvider.name());
-		return new Conversion(this.ledgerPolicy.round(amount.multiply(effective)), effective, rate.rateDate());
+		return new Conversion(amount.multiply(effective), effective, rate.rateDate());
 	}
 
 	/**
@@ -143,11 +148,6 @@ public class ExchangeRateService {
 			store(currency, fetched);
 			return Optional.of(fetched);
 		} catch (RuntimeException ex) {
-			// The provider is down or slow. The transaction is still accepted, just without
-			// a flag, and the
-			// pending rows are recalculated later. Swallowing it here rather than
-			// propagating is the decision
-			// that keeps ingestion lossless.
 			log.warn("Could not obtain the rate for {}/{} on {}: {}", currency.getCode(), ledger, rateDate,
 					ex.getMessage());
 			return Optional.empty();
@@ -169,22 +169,12 @@ public class ExchangeRateService {
 	 */
 	@Transactional
 	public void store(Currency currency, ExchangeRate rate) {
-		// From the rate, not from the provider: with a fallback in play the provider
-		// asked is
-		// not always the one that answered, and currency_rate.source exists to name the
-		// one that
-		// supplied the number.
 		String provider = rate.source();
 		boolean inserted = this.currencyRateRepository.upsert(currency.getCode(), rate.rateDate(), rate.close(),
 				rate.previousClose(), provider) > 0;
 		log.debug("{} the {} rate for {}: {}", inserted ? "Stored" : "Refreshed", currency.getCode(), rate.rateDate(),
 				rate.effectiveRate());
 
-		// Whatever was cached for this pair described the row that has just changed.
-		// The generation
-		// bump retires all of it at once, including entries cached under later days
-		// that this rate
-		// answered through findLatestOnOrBefore.
 		this.rateCache.invalidatePair(currency.getCode(), this.ledgerPolicy.currencyCode());
 	}
 
@@ -199,7 +189,6 @@ public class ExchangeRateService {
 	 *            date
 	 */
 	public record Conversion(BigDecimal sumInLedger, BigDecimal rate, LocalDate rateDate) {
-
 		public static Conversion unavailable() {
 			return new Conversion(null, null, null);
 		}
@@ -209,5 +198,4 @@ public class ExchangeRateService {
 		}
 
 	}
-
 }

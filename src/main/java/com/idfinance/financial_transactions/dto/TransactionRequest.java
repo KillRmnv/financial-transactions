@@ -2,7 +2,6 @@ package com.idfinance.financial_transactions.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -28,7 +27,7 @@ public record TransactionRequest(
 
 		@NotBlank @Size(min = 3, max = 3) @Pattern(regexp = "^[A-Za-z]{3}$") @Schema(description = "ISO 4217 code of the account currency. Case is ignored; the accepted set is published at GET /api/v1/currencies", example = "KZT") String currencyShortname,
 
-		@NotNull @DecimalMin(value = "0.00", inclusive = false) @Digits(integer = 12, fraction = 2) @Schema(description = "Amount in the account currency, strictly positive, at most two decimal places", example = "10000.45") BigDecimal sum,
+		@NotNull @DecimalMin(value = "0.00", inclusive = false) @Schema(description = "Amount in the account currency, strictly positive, any number of decimal places, at the scale the schema stores", example = "10000.45") BigDecimal sum,
 
 		@NotBlank @Schema(description = "Exactly `product` or `service`", example = "product", allowableValues = {
 				"product", "service"}) String expenseCategory,

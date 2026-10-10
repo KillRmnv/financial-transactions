@@ -1,8 +1,10 @@
 package com.idfinance.financial_transactions.controller;
 
+import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.dto.LimitRequest;
 import com.idfinance.financial_transactions.dto.LimitResponse;
 import com.idfinance.financial_transactions.dto.TransactionWithLimitResponse;
+import com.idfinance.financial_transactions.mapper.LimitMapper;
 import com.idfinance.financial_transactions.mapper.TransactionMapper;
 import com.idfinance.financial_transactions.service.LimitService;
 import com.idfinance.financial_transactions.service.ReportingService;
@@ -37,7 +39,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>
  * No business logic here, no repository access either, and no hand-built
  * response objects: reads go through {@link ReportingService} and every DTO
- * comes out of {@link TransactionMapper}.
+ * comes out of {@link TransactionMapper} or {@link LimitMapper}.
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -48,6 +50,15 @@ public final class LimitController {
 	private final LimitService limitService;
 
 	private final ReportingService reportingService;
+
+	private final LimitMapper limitMapper;
+
+	/**
+	 * Read from configuration rather than derived from a row: the digits a client
+	 * is shown are a presentation decision, and the row keeps the precision it was
+	 * given.
+	 */
+	private final LedgerPolicy ledgerPolicy;
 
 	private final TransactionService transactionService;
 
@@ -69,7 +80,7 @@ public final class LimitController {
 		var installed = limitService.install(request);
 
 		LimitResponse body = reportingService.limitRowOf(accountFrom, installed.getId())
-				.map(row -> toResponse(accountFrom, row)).orElseThrow();
+				.map(row -> this.limitMapper.toResponse(accountFrom, row, this.ledgerPolicy)).orElseThrow();
 
 		return ResponseEntity.status(HttpStatus.CREATED).body(body);
 	}
@@ -80,7 +91,8 @@ public final class LimitController {
 	@GetMapping("/limits")
 	List<LimitResponse> findAll(
 			@Parameter(description = "The account to list limits for", example = "0000000123") @RequestParam("account_from") String accountFrom) {
-		return reportingService.limitsOf(accountFrom).stream().map(row -> toResponse(accountFrom, row)).toList();
+		return reportingService.limitsOf(accountFrom).stream()
+				.map(row -> this.limitMapper.toResponse(accountFrom, row, this.ledgerPolicy)).toList();
 	}
 
 	@Operation(summary = "List the transactions that exceeded the limit", description = """
@@ -108,13 +120,8 @@ public final class LimitController {
 
 	private TransactionWithLimitResponse toResponse(ReportingService.ExceededRow row) {
 		return transactionMapper.toResponseWithLimit(row.transaction(), row.accountFrom(), row.currencyCode(),
-				row.expenseCategory(), row.zone(), row.limitDatetime(), row.limitSum(), row.limitCurrencyShortname());
-	}
-
-	private LimitResponse toResponse(String accountFrom, ReportingService.LimitRow row) {
-		return new LimitResponse(accountFrom, row.expenseCategory(), row.limitSum(), row.limitCurrencyShortname(),
-				row.limitDatetime(), row.limitDefault(), row.limitCurrencyShortname(), row.spentLedger(),
-				row.remaining());
+				row.expenseCategory(), row.zone(), row.limitDatetime(), row.limitSum(), row.limitCurrencyShortname(),
+				this.ledgerPolicy);
 	}
 
 }

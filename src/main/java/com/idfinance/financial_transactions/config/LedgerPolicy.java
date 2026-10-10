@@ -31,7 +31,8 @@ public record LedgerPolicy(String currencyCode, int amountScale) {
 	 * @param currencyCode
 	 *            ISO 4217 code of the ledger currency, uppercase
 	 * @param amountScale
-	 *            number of decimal places an amount is stored and reported with
+	 *            number of decimal places an amount is reported with, after storage
+	 *            has kept it as it was given
 	 * @throws IllegalArgumentException
 	 *             if the code is not a three letter uppercase code, or the scale is
 	 *             negative
@@ -47,12 +48,20 @@ public record LedgerPolicy(String currencyCode, int amountScale) {
 	}
 
 	/**
-	 * Rounds an amount the way every amount in this application is rounded.
+	 * Rounds an amount the way every amount is presented to a client.
 	 *
 	 * <p>
-	 * Called once, on the result of a conversion, never on a rate: rounding the
-	 * rate before multiplying would throw away the only precision the conversion
-	 * has.
+	 * The display scale, not the storage scale. A limit of 0.001 is a limit and a
+	 * transaction in a low-rate currency converts to a fraction of a unit; both are
+	 * stored exactly as they arrive, and this is called on the way out — in the
+	 * mappers — rather than before the row is written. Called on the input it would
+	 * decide what a number is allowed to be rather than how it is shown: rounding
+	 * 0.001 before storage produced a limit of 0.00 that the positive-amount check
+	 * then refused.
+	 *
+	 * <p>
+	 * Never called on a rate: rounding the rate before multiplying would throw away
+	 * the only precision the conversion has.
 	 */
 	public BigDecimal round(BigDecimal amount) {
 		return amount.setScale(this.amountScale, RoundingMode.HALF_UP);

@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.mapper;
 
+import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.dto.TransactionResponse;
 import com.idfinance.financial_transactions.dto.TransactionWithLimitResponse;
@@ -30,12 +31,6 @@ public interface TransactionMapper {
 
 	/**
 	 * Builds an unsaved transaction.
-	 *
-	 * <p>
-	 * Every target is named explicitly, including the ones whose name already
-	 * matches. An implicit mapping is a mapping that silently stops working the day
-	 * a field is renamed, and the compiler says nothing about it.
-	 *
 	 * <p>
 	 * {@code occurredAt} and {@code occurredMonth} are not taken from the request
 	 * body: the caller derives both from the timestamp in the configured timezone,
@@ -62,12 +57,12 @@ public interface TransactionMapper {
 	ExpenseTransaction toEntity(TransactionRequest request, Currency currency, Long categoryId, Instant occurredAt,
 			LocalDate occurredMonth);
 
-	default TransactionResponse toResponse(AcceptedTransaction accepted, ZoneId zone, String ledgerCurrency) {
+	default TransactionResponse toResponse(AcceptedTransaction accepted, ZoneId zone, LedgerPolicy policy) {
 		ExpenseTransaction transaction = accepted.transaction();
 		return new TransactionResponse(transaction.getAccountFrom(), transaction.getAccountTo(),
-				accepted.currencyCode(), transaction.getAmount(), accepted.expenseCategory(), at(transaction, zone),
-				transaction.getSumInLedger(), transaction.getLimitExceeded(), ledgerCurrency,
-				transaction.isFlagCalculated());
+				accepted.currencyCode(), money(transaction.getAmount(), policy), accepted.expenseCategory(),
+				at(transaction, zone), money(transaction.getSumInLedger(), policy), transaction.getLimitExceeded(),
+				policy.currencyCode(), transaction.isFlagCalculated());
 	}
 
 	/**
@@ -81,10 +76,23 @@ public interface TransactionMapper {
 	 */
 	default TransactionWithLimitResponse toResponseWithLimit(ExpenseTransaction transaction, String accountFrom,
 			String currencyCode, String expenseCategory, ZoneId zone, OffsetDateTime limitDatetime, BigDecimal limitSum,
-			String limitCurrencyShortname) {
+			String limitCurrencyShortname, LedgerPolicy policy) {
 		return new TransactionWithLimitResponse(accountFrom, transaction.getAccountTo(), currencyCode,
-				transaction.getAmount(), expenseCategory, at(transaction, zone), transaction.getSumInLedger(),
-				transaction.getLimitExceeded(), limitSum, limitDatetime, limitCurrencyShortname);
+				money(transaction.getAmount(), policy), expenseCategory, at(transaction, zone),
+				money(transaction.getSumInLedger(), policy), transaction.getLimitExceeded(), money(limitSum, policy),
+				limitDatetime, limitCurrencyShortname);
+	}
+
+	/**
+	 * Rounding applied to every amount on its way out of the API.
+	 *
+	 * <p>
+	 * Shared with {@link LimitMapper}, which answers the same question for the
+	 * limits report. It lives here because the two mappers would otherwise keep
+	 * their own copies and drift.
+	 */
+	static BigDecimal money(BigDecimal amount, LedgerPolicy policy) {
+		return (amount == null) ? null : policy.round(amount);
 	}
 
 	private static OffsetDateTime at(ExpenseTransaction transaction, ZoneId zone) {

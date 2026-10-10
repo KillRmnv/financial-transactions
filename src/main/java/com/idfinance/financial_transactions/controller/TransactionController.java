@@ -47,9 +47,11 @@ public final class TransactionController {
 	private final MonthBoundary monthBoundary;
 
 	/**
-	 * To say which currency {@code sumInLedger} is in. Read from configuration
-	 * rather than guessed from the request, because a transaction's own currency is
-	 * not the one its converted amount is expressed in.
+	 * Says which currency {@code sumInLedger} is in, and at what scale an amount is
+	 * presented. Both are read from configuration rather than guessed from the
+	 * request: a transaction's own currency is not the one its converted amount is
+	 * expressed in, and the digits a client is shown are not the digits the row
+	 * stores.
 	 */
 	private final LedgerPolicy ledgerPolicy;
 
@@ -75,8 +77,10 @@ public final class TransactionController {
 	ResponseEntity<List<TransactionResponse>> acceptBatch(
 			@Valid @RequestBody @NotEmpty @Size(max = 100) List<@Valid TransactionRequest> requests) {
 		var accepted = this.transactionService.acceptBatch(requests);
-		return ResponseEntity.status(HttpStatus.CREATED).body(accepted.stream()
-				.map(row -> this.transactionMapper.toResponse(row, this.monthBoundary.zone(), ledgerCode())).toList());
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(accepted.stream().map(
+						row -> this.transactionMapper.toResponse(row, this.monthBoundary.zone(), this.ledgerPolicy))
+						.toList());
 	}
 
 	@Operation(summary = "Accept an expense operation", description = """
@@ -95,11 +99,6 @@ public final class TransactionController {
 	ResponseEntity<TransactionResponse> accept(@Valid @RequestBody TransactionRequest request) {
 		var accepted = transactionService.accept(request);
 		return ResponseEntity.status(HttpStatus.CREATED)
-				.body(transactionMapper.toResponse(accepted, this.monthBoundary.zone(), ledgerCode()));
+				.body(transactionMapper.toResponse(accepted, this.monthBoundary.zone(), this.ledgerPolicy));
 	}
-
-	private String ledgerCode() {
-		return this.ledgerPolicy.currencyCode();
-	}
-
 }

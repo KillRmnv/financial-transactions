@@ -60,8 +60,17 @@ public class LimitService {
 		ExpenseCategory category = category(request.expenseCategory());
 		Currency ledger = ledgerCurrency();
 
+		// Stored exactly as the client sent it. `amount` is numeric(20, 8) now, so
+		// 0.001 is
+		// a limit and not something that rounds to zero and trips the positive-amount
+		// check.
+		// Rounding is a presentation decision — LedgerPolicy.round belongs on the way
+		// out,
+		// where a client reads the number, not on the way in, where it would decide
+		// what
+		// the number is allowed to be.
 		ExpenseLimit installed = this.expenseLimitRepository.save(new ExpenseLimit(request.accountFrom(),
-				category.getId(), ledger, this.ledgerPolicy.round(request.sum()), Instant.now(this.clock)));
+				category.getId(), ledger, request.sum(), Instant.now(this.clock)));
 
 		this.metricsRecorder.limitInstalled(category.getCode());
 		log.info("Installed a {} {} {} limit for account {} at {}", request.sum(), ledger.getCode(), category.getCode(),

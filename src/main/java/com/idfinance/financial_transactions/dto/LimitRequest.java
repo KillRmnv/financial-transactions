@@ -2,7 +2,6 @@ package com.idfinance.financial_transactions.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -24,6 +23,6 @@ public record LimitRequest(
 		@NotBlank @Schema(description = "Exactly `product` or `service`", example = "product", allowableValues = {
 				"product", "service"}) String expenseCategory,
 
-		@NotNull @DecimalMin(value = "0.00", inclusive = false) @Digits(integer = 12, fraction = 2) @Schema(description = "The limit, always in the ledger currency. There is no currency field because there is no choice to make", example = "2000.00") BigDecimal sum) {
+		@NotNull @DecimalMin(value = "0.00", inclusive = false) @Schema(description = "The limit, always in the ledger currency. There is no currency field because there is no choice to make", example = "2000.00") BigDecimal sum) {
 
 }
