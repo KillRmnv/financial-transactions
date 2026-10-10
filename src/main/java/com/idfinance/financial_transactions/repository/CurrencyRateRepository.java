@@ -40,13 +40,14 @@ public interface CurrencyRateRepository extends JpaRepository<CurrencyRate, Long
 	 * The most recent rate not later than the requested day, used when that day has
 	 * no close of its own yet.
 	 */
-	@Query("""
-			select r from CurrencyRate r
-			where r.baseCurrency = :currency
-			  and r.rateDate <= :date
-			order by r.rateDate desc
-			""")
-	Optional<CurrencyRate> findLatestOnOrBefore(@Param("currency") Currency currency, @Param("date") LocalDate date);
+	@Query(value = """
+			select * from currency_rate
+			where base_currency = :code
+			  and rate_date <= :date
+			order by rate_date desc
+			limit 1
+			""", nativeQuery = true)
+	Optional<CurrencyRate> findLatestOnOrBefore(@Param("code") String code, @Param("date") LocalDate date);
 
 	/**
 	 * Writes the rate for a pair and day, or refreshes the one already there.
