@@ -87,13 +87,17 @@ Twelve Data хранит примерно **год истории**, а все �
 | `app.ledger.currency-code` | `USD` | валюта учёта: суммы лимитов и `ledger_sum` |
 | `app.ledger.amount-scale` | `2` | знаков после запятой у денежной суммы |
 | `app.default-limit-sum` | `1000.00` | лимит, когда клиент ничего не устанавливал |
-| `app.rates.source` | `twelvedata` | как провайдер называется в `currency_rate.source` |
-| `app.rates.base-url` | — | пусто — провайдер не регистрируется вовсе |
-| `app.rates.api-key` | — | ключ внешнего API |
-| `app.rates.connect-timeout` / `read-timeout` | `2s` / `5s` | таймауты внешнего запроса |
+| `app.rates.providers.<имя>.base-url` | — | адрес провайдера; пусто — он не регистрируется |
+| `app.rates.providers.<имя>.api-key` | — | ключ; необязателен, у Frankfurter его нет |
+| `app.rates.providers.<имя>.source` | имя блока | как провайдер называется в `currency_rate.source` |
+| `app.rates.providers.<имя>.order` | — | кто спрашивается первым, меньше раньше |
+| `app.rates.providers-enabled` | `true` | общий выключатель блока; сьюты с заглушкой ставят `false` |
+| `app.rates.connect-timeout` / `read-timeout` | `3s` / `5s` | таймауты внешнего запроса, общие для всех провайдеров |
 | `app.rates.attempts` / `retry-backoff` | `3` / `500ms` | повторы при сбое внешнего API |
 | `app.scheduled-fetch-hour` | `7` | час суточного обхода в `app.month-timezone` |
 | `app.scheduling.enabled` | `true` | регистрировать ли задачи по расписанию вообще |
+| `app.scheduling.weekly-currency-import.cron` | `0 30 4 * * MON` | расписание импорта ISO 4217, cron из шести полей |
+| `app.rates.fallback-days` | `10` | за сколько дней назад искать курс, когда за день его нет |
 | `app.cache.enabled` / `ttl` / `key-prefix` | `true` / `12h` / `financial:rate:` | кэш курсов |
 | `app.rate-limits.<блок>` | — | квоты приёма по адресу вызывающего |
 
