@@ -57,7 +57,7 @@ import org.springframework.test.context.TestPropertySource;
 // is the only RatesProvider. Two @Primary beans of that type is a context that
 // will not
 // start, and a composite over a stub has nothing to fall back to in any case.
-@TestPropertySource(properties = {"app.rates.base-url=", "app.rates.frankfurter.base-url="})
+@TestPropertySource(properties = "app.rates.providers-enabled=false")
 @Import({TestcontainersConfiguration.class, StubRatesConfiguration.class})
 class TransactionIsolationTests {
 

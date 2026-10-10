@@ -3,7 +3,6 @@ package com.idfinance.financial_transactions.bdd.support;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
-import com.idfinance.financial_transactions.config.AppProperties;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -24,43 +23,29 @@ import org.springframework.context.annotation.Primary;
  * query parameters, the JSON it reads back — is never exercised. Here it is.
  *
  * <p>
- * {@link HttpRatesStub} holds the stubs; this class only wires the server and
- * points the application at it. The URL arrives through
- * {@code app.rates.base-url}, which is the same property a deployment sets, so
- * the conditional on the real client turns it on with no test-only wiring in
- * production code.
+ * {@link HttpRatesStub} holds the stubs; this class only wires the server.
+ * Pointing the application at it is done by the context that imports this
+ * class, through the same {@code app.rates.providers.<name>.base-url}
+ * properties a deployment sets — and it has to be done there:
+ * {@code @TestPropertySource} on an imported configuration class is not
+ * applied, so a URL set here would be silently ignored and the adapters would
+ * keep whatever defaults {@code application.yml} gives them. That failure is
+ * invisible by design of the bug — one provider with a default URL registers
+ * and answers, the one without stays absent, and the suite reports a missing
+ * rate rather than a wrong configuration.
  */
 @TestConfiguration(proxyBeanMethods = false)
 public class WireMockRatesConfiguration {
 
-	/**
-	 * A fixed port rather than a random one: the application reads its URL from a
-	 * property that this configuration has to publish before the context starts,
-	 * and a dynamic port would need a two-phase start that buys nothing here.
-	 * Nothing outside the test JVM can reach it.
-	 */
-	static final int PORT = 18080;
-
 	@Bean(initMethod = "start", destroyMethod = "stop")
 	WireMockServer ratesProviderServer() {
-		return new WireMockServer(WireMockConfiguration.options().port(PORT));
+		return new WireMockServer(WireMockConfiguration.options().port(WireMockPort.VALUE));
 	}
 
 	@Bean
 	@Primary
 	HttpRatesStub ratesStub(WireMockServer server) {
 		return new HttpRatesStub(server);
-	}
-
-	@Bean
-	@Primary
-	AppProperties ratesAppProperties(AppProperties delegate) {
-		return new AppProperties(delegate.defaultLimitSum(), delegate.monthTimezone(), delegate.scheduledFetchHour(),
-				new AppProperties.Rates("wiremock", "http://localhost:" + PORT, "test-key",
-						delegate.rates().connectTimeout(), delegate.rates().readTimeout(), delegate.rates().attempts(),
-						delegate.rates().retryBackoff(),
-						new AppProperties.Rates.Frankfurter("http://localhost:" + PORT),
-						delegate.rates().fallbackDays()));
 	}
 
 	/**

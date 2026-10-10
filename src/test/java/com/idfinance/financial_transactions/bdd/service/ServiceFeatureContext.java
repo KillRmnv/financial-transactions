@@ -22,7 +22,7 @@ import org.springframework.test.context.TestPropertySource;
 // @Primary and the context refuses to start — which is the honest failure,
 // since a
 // composite over a stub has nothing to fall back to.
-@TestPropertySource(properties = {"app.rates.base-url=", "app.rates.frankfurter.base-url="})
+@TestPropertySource(properties = "app.rates.providers-enabled=false")
 @Import(value = {TestcontainersConfiguration.class, BddInfrastructureConfiguration.class, StubRatesConfiguration.class,
 		TestCurrencyLookup.class})
 public class ServiceFeatureContext {

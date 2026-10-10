@@ -31,10 +31,6 @@ import org.springframework.test.context.TestPropertySource;
 		TestCurrencyLookup.class})
 @TestPropertySource(properties = {"app.rate-limits.ingestion.limit-for-period=3",
 		"app.rate-limits.ingestion.limit-refresh-period=1h", "app.rate-limits.ingestion.retry-after-seconds=1",
-		// Both provider URLs empty, so the fallback composite is not created and the
-		// in-process stub is the only RatesProvider. Two @Primary beans of that type is
-		// a
-		// context that will not start.
-		"app.rates.base-url=", "app.rates.frankfurter.base-url="})
+		"app.rates.providers-enabled=false"})
 public class QuotaFeatureContext {
 }
