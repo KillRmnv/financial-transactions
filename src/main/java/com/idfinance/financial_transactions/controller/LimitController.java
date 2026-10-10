@@ -112,8 +112,8 @@ public final class LimitController {
 	}
 
 	private LimitResponse toResponse(String accountFrom, ReportingService.LimitRow row) {
-		return new LimitResponse(row.id(), accountFrom, row.expenseCategory(), row.limitSum(),
-				row.limitCurrencyShortname(), row.limitDatetime(), row.spentUsd(), row.remainingUsd());
+		return new LimitResponse(accountFrom, row.expenseCategory(), row.limitSum(), row.limitCurrencyShortname(),
+				row.limitDatetime(), row.spentUsd(), row.remainingUsd());
 	}
 
 }

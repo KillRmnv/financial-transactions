@@ -15,8 +15,6 @@ import java.time.OffsetDateTime;
 @Schema(description = "A limit and what has been spent against it in the current month")
 public record LimitResponse(
 
-		@Schema(description = "Identifier of the limit row", example = "1") Long id,
-
 		String accountFrom,
 
 		@Schema(description = "`product` or `service`", example = "product") String expenseCategory,

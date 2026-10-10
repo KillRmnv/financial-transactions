@@ -16,8 +16,6 @@ import java.time.OffsetDateTime;
 @Schema(description = "A transaction that exceeded a limit, with the limit it was actually measured against")
 public record TransactionWithLimitResponse(
 
-		@Schema(description = "Identifier of the stored row", example = "1") Long id,
-
 		String accountFrom, String accountTo,
 
 		@Schema(description = "ISO 4217 code of the account currency", example = "KZT") String currencyShortname,

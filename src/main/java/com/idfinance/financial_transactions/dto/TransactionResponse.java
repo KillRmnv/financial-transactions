@@ -16,8 +16,6 @@ import java.time.OffsetDateTime;
 @Schema(description = "The stored transaction and the flag that was computed for it")
 public record TransactionResponse(
 
-		@Schema(description = "Identifier of the stored row", example = "1") Long id,
-
 		String accountFrom, String accountTo,
 
 		@Schema(description = "ISO 4217 code of the account currency, as stored", example = "KZT") String currencyShortname,
