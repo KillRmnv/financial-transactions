@@ -41,6 +41,12 @@ app:
   # that happens to be alive in the right hour starts calling the external API.
   scheduling:
     enabled: true
+    # A cron expression, in the Spring six-field form, for the ISO 4217 import. The default is
+    # one call a week, which is what the rate at which new codes appear justifies; an operator
+    # who wants to see a new code sooner on a free endpoint lowers it to daily, and one who
+    # declines to pay for the listing switches scheduled_job off instead.
+    weekly-currency-import:
+      cron: "0 30 4 * * MON"
 
   month-timezone: UTC
 
@@ -82,6 +88,7 @@ app:
     read-timeout: 5s
     attempts: 3
     retry-backoff: 500ms
+    fallback-days: 10
 
     # The fallback, asked only when the provider above has no answer. No key and no quota,
     # which is why this is one URL and nothing else — see the note on the two providers in

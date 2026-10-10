@@ -37,9 +37,36 @@ public record AppProperties(BigDecimal defaultLimitSum, ZoneId monthTimezone, in
 	 *            total attempts before the transaction is rejected, at least 1
 	 * @param retryBackoff
 	 *            pause between attempts
+	 * @param fallbackDays
+	 *            how far to look in the past
 	 */
 	public record Rates(String source, String baseUrl, String apiKey, Duration connectTimeout, Duration readTimeout,
-			int attempts, Duration retryBackoff, Frankfurter frankfurter) {
+			int attempts, Duration retryBackoff, Frankfurter frankfurter, int fallbackDays) {
+
+		/**
+		 * Checks the two settings that are meaningless at zero.
+		 *
+		 * <p>
+		 * {@code fallbackDays} is the size of the window the adapter looks back over
+		 * when a day has no close of its own: at zero that window is the day itself,
+		 * the search finds nothing, and the specification's "price it from the previous
+		 * close" never runs — with no error anywhere. {@code attempts} at zero means
+		 * the retry policy never attempts at all.
+		 *
+		 * <p>
+		 * Same reasoning as {@code LedgerPolicy} and {@code RateCachePolicy}: a
+		 * property that cannot work fails at startup rather than being read as a number
+		 * later. The parameters, not the fields, because a compact record constructor
+		 * has not assigned them yet.
+		 */
+		public Rates {
+			if (attempts < 1) {
+				throw new IllegalArgumentException("app.rates.attempts must be at least 1, was " + attempts);
+			}
+			if (fallbackDays < 1) {
+				throw new IllegalArgumentException("app.rates.fallback-days must be at least 1, was " + fallbackDays);
+			}
+		}
 
 		/**
 		 * The fallback provider.
