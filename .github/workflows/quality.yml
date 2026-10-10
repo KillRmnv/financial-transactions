@@ -90,8 +90,12 @@ jobs:
             if docker exec smoke-app curl -fsS http://localhost:8080/actuator/health; then
               echo
               echo "Image is healthy."
-              docker rm -f smoke-app smoke-db smoke-redis
-              docker network rm financial-smoke
+              # Only the application goes. The databases and the network stay up, because the
+              # step below starts a second container against them — removing them here made that
+              # step fail with "network financial-smoke not found" and exit 125, which reads as
+              # the image being broken rather than as two steps disagreeing about cleanup. The
+              # job's own cleanup takes everything down at the end.
+              docker rm -f smoke-app
               exit 0
             fi
             sleep 3
@@ -119,10 +123,14 @@ jobs:
             -e DEPLOYMENT_ENVIRONMENT=ci \
             financial-transactions:ci
           for i in $(seq 1 30); do
-            curl -fsS http://localhost:8081/v3/api-docs | jq . > openapi.json && break
+            curl -fsS http://localhost:8081/v3/api-docs -o openapi.json && break
             sleep 3
           done
-          if [ ! -s openapi.json ]; then
+          # `jq -e '.paths | length > 0'` and not `[ -s openapi.json ]`. An empty document makes jq
+          # print `null` and exit 0, so a size check accepts it: the artifact would be uploaded as
+          # the four characters "null" and the failure would only show up in whatever consumes it.
+          # -e sets jq's exit status from the value, which is what "is there a contract here" means.
+          if ! jq -e '.paths | length > 0' openapi.json > /dev/null; then
             echo "The contract was not produced; container logs follow."
             docker logs docs-app
             exit 1
@@ -137,9 +145,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Clean up on failure
-        if: failure()
+      - name: Clean up
+        # Always, not only on failure: the smoke check deliberately leaves the databases and the
+        # network up for the contract step, so without this the runner keeps three containers for
+        # the rest of the job.
+        if: always()
         run: |
-          docker rm -f docs-app || true
-          docker rm -f smoke-app smoke-db smoke-redis || true
+          docker rm -f docs-app smoke-app smoke-db smoke-redis || true
           docker network rm financial-smoke || true
