@@ -59,15 +59,8 @@ public class WireMockRatesConfiguration {
 				new AppProperties.Rates("wiremock", "http://localhost:" + PORT, "test-key",
 						delegate.rates().connectTimeout(), delegate.rates().readTimeout(), delegate.rates().attempts(),
 						delegate.rates().retryBackoff(),
-						// The fallback points at the same server, not at the public instance. Leaving
-						// it
-						// on the real URL would have the suite reach the internet, and two consequences
-						// follow: a stub means nothing, and a pair nobody stubbed is quietly answered
-						// by a
-						// live provider — which is how scenarios that assert "stored without a flag"
-						// start
-						// failing for a reason that has nothing to do with what they are testing.
-						new AppProperties.Rates.Frankfurter("http://localhost:" + PORT)));
+						new AppProperties.Rates.Frankfurter("http://localhost:" + PORT),
+						delegate.rates().fallbackDays()));
 	}
 
 	/**
@@ -95,13 +88,7 @@ public class WireMockRatesConfiguration {
 		 * {@code values[]} with {@code close} and {@code previous_close}.
 		 */
 		public void closeOn(String baseCurrency, String quoteCurrency, LocalDate date, BigDecimal close) {
-			// The date is in the body because the adapter now compares it rather than
-			// trusting
-			// the position of the entry. A stub whose datetime was decorative would pass
-			// every
-			// scenario that answered with a close and fail the one that did not, which is
-			// exactly
-			// the shape of the bug this provider check was written for.
+
 			String body = """
 					{"values":[{"datetime":"%s","close":%s,"previous_close":null}]}""".formatted(date.toString(),
 					close.toPlainString());
@@ -226,14 +213,6 @@ public class WireMockRatesConfiguration {
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
 					.willReturn(WireMock.serverError().withStatus(503)));
 		}
-
-		// --- Frankfurter ---
-		//
-		// The fallback is on the same server, so the real adapter is exercised through
-		// the
-		// same HTTP boundary as the paid one. It needs no configuration beyond the URL,
-		// which
-		// is why these stubs are here rather than behind a second server.
 
 		/**
 		 * One pair, in the orientation asked for — which is the whole point of this

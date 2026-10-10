@@ -55,22 +55,18 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class WeeklyCurrencyImport {
 
-	private final RatesProvider ratesProvider;
-
 	private final ScheduledJobService scheduledJobService;
 
 	private final CurrencyImporter currencyImporter;
 
-	@Scheduled(cron = "0 30 4 * * MON", zone = "${app.month-timezone}")
+	// The schedule is a property, not the literal the annotation came with: an
+	// operator who
+	// pays for the endpoint is entitled to decide how often it is called without a
+	// release,
+	// and one who declines to pay at all switches the row off instead.
+	@Scheduled(cron = "${app.scheduling.weekly-currency-import.cron:0 30 4 * * MON}", zone = "${app.month-timezone}")
 	@Transactional
 	public void refreshCurrencies() {
-		// Checked here rather than as a bean condition, because a condition is settled
-		// while the
-		// context registers it and cannot be changed afterwards. The only thing a
-		// disabled job does
-		// is return, and a JVM waking up once a week costs nothing — it is the provider
-		// call that
-		// costs credits, and this is where that call stops.
 		if (!this.scheduledJobService.isEnabled(ScheduledJob.Names.WEEKLY_CURRENCY_IMPORT)) {
 			log.debug("Skipping the currency import: {} is switched off in scheduled_job",
 					ScheduledJob.Names.WEEKLY_CURRENCY_IMPORT);

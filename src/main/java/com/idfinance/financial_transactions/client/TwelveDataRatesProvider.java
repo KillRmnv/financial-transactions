@@ -14,7 +14,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -37,29 +39,15 @@ import org.springframework.web.util.UriBuilder;
  * </ul>
  *
  * <p>
- * <strong>Why this provider and not another.</strong> The specification asks
- * for the day's {@code close}, falling back to {@code previous_close} when
- * there is none — a weekend or a holiday. That pair is a property of an
- * exchange session, and Twelve Data's {@code /time_series} is the one endpoint
- * among the three providers named in the task that returns both, for free, for
- * a dated symbol. Alpha Vantage's free {@code CURRENCY_EXCHANGE_RATE} returns a
- * live rate rather than a session close; Open Exchange Rates updates hourly
- * from a reference rate and has no time series at all on its free plan. Adding
- * either would mean a different adapter <em>and</em> a different meaning for
- * {@code previous_close}, which is why the work is not a URL change.
- *
- * <p>
  * Retries and timeouts come from configuration, because the ingestion path must
  * not hang when the provider is slow. The retry is resilience4j's {@link Retry}
  * core API rather than its {@code @Retry} aspect: an aspect needs the Spring
  * starter and AOP, and the policy is already built once in the constructor
  * instead of being scattered over annotated methods.
  *
- * <p>
- * The client builds its own {@link RestClient} rather than injecting a builder:
- * Boot 4 does not contribute a {@code RestClient.Builder} bean.
  */
 @Component
+@Order(1)
 @ConditionalOnProperty(name = "app.rates.base-url")
 @Slf4j
 public final class TwelveDataRatesProvider implements RatesProvider {
@@ -79,7 +67,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 */
 	private static final String SEARCH_PAGE = "500";
 
-	/** A currency pair as the provider spells it, and nothing else. */
+	/** A currency pair as the provider spells it. */
 	private static final String BASE_QUOTE = "^[A-Z]{3}/[A-Z]{3}$";
 
 	public TwelveDataRatesProvider(AppProperties properties, LedgerPolicy ledgerPolicy) {
@@ -94,13 +82,6 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	/**
 	 * The retry policy is built once, from configuration, rather than assembled per
 	 * call.
-	 *
-	 * <p>
-	 * The core resilience4j API is used instead of the {@code @Retry} aspect on
-	 * purpose: an aspect would need {@code resilience4j-spring-boot} plus AOP, and
-	 * this class already has to be written as an adapter. The decorator gives the
-	 * same behaviour — bounded attempts, a fixed pause between them, and the last
-	 * failure propagated once the attempts run out.
 	 */
 	private static RetryConfig retryConfig(AppProperties.Rates rates) {
 		return RetryConfig.custom().maxAttempts(Math.max(1, rates.attempts()))
@@ -109,9 +90,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 
 	/**
 	 * The provider name is configuration, not a constant. It is written into
-	 * {@code currency_rate.source}, so it has to be set per deployment: a staging
-	 * instance talking to a sandbox and production talking to a paid tier must be
-	 * distinguishable in stored data.
+	 * {@code currency_rate.source}, so it has to be set per deployment.
 	 */
 	@Override
 	public String name() {
@@ -123,13 +102,8 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * orientation.
 	 *
 	 * <p>
-	 * Twelve Data has no {@code KZT/USD} — the symbol does not exist and answers
-	 * 404 with "symbol or figi parameter is missing or invalid", which reads like a
-	 * malformed request rather than a missing pair. {@code USD/KZT} is there, so a
-	 * provider that answers only what it was asked produces no tenge rate at all
-	 * and the transaction is stored unflagged. Asking for the other side and
-	 * inverting is what makes the specification's own pair work against this
-	 * provider.
+	 * Twelve Data has no some codes. Asking for the other side and inverting is
+	 * what makes the specification's own pair work against this provider.
 	 *
 	 * <p>
 	 * The inverse costs one more request only when the direct one fails, which is
@@ -152,14 +126,6 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	/**
 	 * One attempt at one symbol, with the retry policy around it.
 	 *
-	 * <p>
-	 * Wrapped in an {@link Optional} rather than returned as a bare reference: the
-	 * supplier answers null whenever the provider does not publish the symbol, and
-	 * {@code Retry.executeSupplier} carries {@code @NonNull}, which is wrong about
-	 * a {@link java.util.function.Supplier} and which SpotBugs takes at its word —
-	 * the check then reads as redundant and is removed, and the first missing pair
-	 * turns into an NPE. The Optional is the type saying what is true: nothing,
-	 * rather than nothing unless you look.
 	 */
 	private Optional<ExchangeRate> askFor(String symbol, String baseCurrency, String quoteCurrency, LocalDate date) {
 		return Optional.ofNullable(this.retry.executeSupplier(() -> {
@@ -174,12 +140,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * <p>
 	 * <strong>The provider does not send {@code previous_close}.</strong> Its
 	 * answer carries exactly {@code datetime, open, high, low, close} — checked
-	 * against the live API, not assumed. Reading that field, which this record was
-	 * written to do, therefore produces null on every request, and the rule the
-	 * specification states for п.3 — no close for the day, a weekend or a holiday,
-	 * so use the previous close — never runs. It fails quietly: the transaction is
-	 * stored without a flag, which is the right answer to a missing rate and the
-	 * wrong one to a rate that exists.
+	 * against the live API, not assumed.
 	 *
 	 * <p>
 	 * The fallback is computed here, out of what the provider does send: one more
@@ -199,19 +160,8 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 			return null;
 		}
 
-		// Either shape of "no rate for that day" leads to the same place: the provider
-		// omits a
-		// closed day from the series entirely, so an empty answer is the holiday case
-		// rather
-		// than a failure, and a present entry with a null close is the same thing from
-		// another
-		// API version. Deciding between them here would mean deciding which one to
-		// believe.
 		TimeSeriesResponse.Value value = valueFor(ofTheDay, date);
 		if (value != null && value.close() != null) {
-			// A previous_close is kept when a deployment of the API does send one: it is
-			// the
-			// provider's own answer rather than one reconstructed from a window.
 			return new ExchangeRate(baseCurrency, quoteCurrency, date, value.close(), value.previousClose(), name());
 		}
 
@@ -223,17 +173,6 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 				previous);
 		return new ExchangeRate(baseCurrency, quoteCurrency, date, null, previous, name());
 	}
-
-	/**
-	 * How far back the fallback request looks.
-	 *
-	 * <p>
-	 * Ten days is a calendar fortnight, which covers the longest run of closed days
-	 * a currency market has — a holiday weekend plus a day either side — without a
-	 * window wide enough for the answer to reach past a gap the specification would
-	 * rather see reported as missing.
-	 */
-	private static final int FALLBACK_WINDOW_DAYS = 10;
 
 	/**
 	 * How the provider says a date is outside the history its plan keeps.
@@ -250,7 +189,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * holds none.
 	 */
 	private BigDecimal lastCloseBefore(String symbol, LocalDate date) {
-		LocalDate from = date.minusDays(FALLBACK_WINDOW_DAYS);
+		LocalDate from = date.minusDays(properties.rates().fallbackDays());
 		TimeSeriesResponse window = request(symbol, (builder) -> builder.queryParam("start_date", from.toString())
 				.queryParam("end_date", date.minusDays(1).toString()));
 		if (window == null || window.values() == null) {
@@ -286,25 +225,10 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 							.build())
 					.retrieve().body(TimeSeriesResponse.class);
 		} catch (HttpClientErrorException.NotFound ex) {
-			// The symbol does not exist for this provider, which is a fact about the pair
-			// rather
-			// than a failure of the call: asking again cannot create it, and letting the
-			// exception
-			// out would spend every retry before the caller could try the other
-			// orientation.
 			log.debug("{} has no symbol {}: {}", this.properties.rates().source(), symbol,
 					ex.getResponseBodyAsString());
 			return null;
 		} catch (HttpClientErrorException.BadRequest ex) {
-			// The provider answers 400 "No data is available on the specified dates" for a
-			// date
-			// older than the history its plan keeps — a fact about the data, not a
-			// malformed
-			// request. Let it out and the log reads "400 Bad Request" against our own call,
-			// which
-			// is both wrong and alarming on a date the specification is full of. Any other
-			// 400 is
-			// still a defect on this side and still travels.
 			if (ex.getResponseBodyAsString().contains(NO_DATA)) {
 				log.debug("{} has no data before the date asked for: {}", this.properties.rates().source(),
 						ex.getResponseBodyAsString());
@@ -339,11 +263,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * <p>
 	 * <strong>There is no endpoint for this.</strong> The obvious
 	 * {@code GET /currency} answers 404 — it does not exist, not even as a paid
-	 * tier — and the first version of this adapter called it anyway, which made
-	 * every startup import fail and the lookup stay at whatever the migration
-	 * seeded. A stub cannot catch that: WireMock answers whatever it is given a
-	 * stub for, and this path was only ever exercised against a provider that had
-	 * been assumed rather than asked.
+	 * tier.
 	 *
 	 * <p>
 	 * What exists is
@@ -378,32 +298,14 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 		}
 
 		if (response == null || response.data() == null || response.data().isEmpty()) {
-			// Said out loud because the alternative is invisible. The free tier answers a
-			// request over
-			// its quota with an empty body, so "the provider published nothing" and "the
-			// provider
-			// published nothing because we were not allowed to ask" are the same empty
-			// list, and a
-			// lookup that stops growing looks exactly like one whose provider has nothing
-			// new.
 			log.warn("{} answered the currency search with no data; the lookup keeps what it has",
 					this.properties.rates().source());
 			return List.of();
 		}
 		return response.data().stream().map(SymbolSearchResponse.Symbol::symbol)
-				// Only the LEDGER/OTHER pairs: symbol_search also answers equities, ETFs and
-				// crypto,
-				// and a code parsed out of "AAPL" would be a currency the provider never
-				// quotes.
-				.filter(symbol -> symbol != null && symbol.matches(BASE_QUOTE))
-				// The OTHER side, not the base. The search is asked about the ledger currency,
-				// so
-				// every pair it answers is LEDGER/SOMETHING and the base is the same value in
-				// every
-				// row — taking it yields the ledger itself, filtered out one line below, and an
-				// empty import that looks like a provider with nothing new.
-				.map(symbol -> symbol.split("/")[1]).filter(other -> !other.equals(ledger)).distinct()
-				.map(other -> new PublishedCurrency(other, null)).toList();
+				.filter(symbol -> symbol != null && symbol.matches(BASE_QUOTE)).map(symbol -> symbol.split("/")[1])
+				.filter(other -> !other.equals(ledger)).distinct().map(other -> new PublishedCurrency(other, null))
+				.toList();
 	}
 
 	private static ClientHttpRequestFactory requestFactory(AppProperties.Rates rates) {

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -55,6 +56,7 @@ import org.springframework.web.client.RestClientResponseException;
  * longer exist.
  */
 @Component
+@Order(2)
 @ConditionalOnProperty(name = "app.rates.frankfurter.base-url", matchIfMissing = true)
 @Slf4j
 public final class FrankfurterRatesProvider implements RatesProvider {
@@ -73,10 +75,6 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 
 	public FrankfurterRatesProvider(AppProperties properties) {
 		this.properties = properties;
-		// Built here rather than from the injected builder because the base URL is this
-		// provider's own configuration, and a shared client would carry whichever URL
-		// was
-		// configured first.
 		this.client = RestClient.builder().baseUrl(properties.rates().frankfurter().baseUrl())
 				.requestFactory(requestFactory(properties.rates())).build();
 	}
