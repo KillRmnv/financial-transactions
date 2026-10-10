@@ -45,7 +45,7 @@ entity "expense_limit" as expense_limit {
   account_from : varchar(10)
   category_id  : smallint      <<FK>>
   currency_id  : smallint      <<FK>>
-  sum          : numeric(14,2)
+  amount       : numeric(14,2)
   created_at   : timestamptz
   is_default   : boolean
 }
@@ -56,7 +56,7 @@ entity "expense_transaction" as expense_transaction {
   account_from    : varchar(10)
   account_to      : varchar(10)
   currency_id     : smallint         <<FK>>
-  sum             : numeric(14,2)
+  amount          : numeric(14,2)
   category_id     : smallint         <<FK>>
   occurred_at     : timestamptz
   occurred_month  : date
@@ -69,6 +69,13 @@ entity "expense_transaction" as expense_transaction {
   --
   flag_calculated : boolean
   created_at      : timestamptz
+}
+
+entity "scheduled_job" as scheduled_job {
+  name        : varchar(64)  <<PK>>
+  --
+  enabled     : boolean
+  description : varchar(255)
 }
 
 currency ||--o| currency_pair       : "is swept for"
