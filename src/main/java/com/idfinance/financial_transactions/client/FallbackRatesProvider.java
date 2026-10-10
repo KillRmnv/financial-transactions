@@ -110,8 +110,18 @@ public final class FallbackRatesProvider implements RatesProvider {
 				.filter(java.util.Objects::nonNull).toList();
 	}
 
+	/**
+	 * The name of whichever provider is asked first, which is the one a rate is
+	 * recorded under when it is the primary that answered.
+	 *
+	 * <p>
+	 * {@code getIfAvailable()} called once and held, rather than tested against
+	 * null and then called again: the two calls are separate lookups, and SpotBugs
+	 * is right that the second one is dereferenced on a value nobody checked.
+	 */
 	private String primaryName() {
-		return this.paid.getIfAvailable() != null ? this.paid.getIfAvailable().name() : "frankfurter";
+		RatesProvider paid = this.paid.getIfAvailable();
+		return (paid != null) ? paid.name() : FrankfurterRatesProvider.NAME;
 	}
 
 }

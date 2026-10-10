@@ -59,6 +59,14 @@ import org.springframework.web.client.RestClientResponseException;
 @Slf4j
 public final class FrankfurterRatesProvider implements RatesProvider {
 
+	/**
+	 * What lands in {@code currency_rate.source} for a rate that came from here. A
+	 * named constant because the composite reports it when this provider is the
+	 * only one configured, and a string literal in two places would be two things
+	 * to keep in step.
+	 */
+	public static final String NAME = "frankfurter";
+
 	private final AppProperties properties;
 
 	private final RestClient client;
@@ -82,7 +90,7 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 
 	@Override
 	public String name() {
-		return "frankfurter";
+		return NAME;
 	}
 
 	/**
