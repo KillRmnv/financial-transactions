@@ -78,9 +78,6 @@ class ApiSteps {
 	private ResponseEntity<String> response;
 	private JsonNode responseBody;
 
-	ApiSteps() {
-	}
-
 	@Before
 	void cleanUp() {
 		this.storedWorldCleaner.clean();
@@ -658,16 +655,10 @@ class ApiSteps {
 		return codes;
 	}
 	@Autowired
-	public rather(
-		ObjectMapper objectMapper,
-		SettableClock clock,
-		ExpenseTransactionRepository expenseTransactionRepository,
-		ExpenseLimitRepository expenseLimitRepository,
-		CurrencyRateRepository currencyRateRepository,
-		RestClient.Builder restClientBuilder,
-		HttpRatesStub ratesStub,
-		StoredWorldCleaner storedWorldCleaner,
-		Environment environment) {
+	public ApiSteps(ObjectMapper objectMapper, SettableClock clock,
+			ExpenseTransactionRepository expenseTransactionRepository, ExpenseLimitRepository expenseLimitRepository,
+			CurrencyRateRepository currencyRateRepository, RestClient.Builder restClientBuilder,
+			HttpRatesStub ratesStub, StoredWorldCleaner storedWorldCleaner, Environment environment) {
 		this.objectMapper = objectMapper;
 		this.clock = clock;
 		this.expenseTransactionRepository = expenseTransactionRepository;

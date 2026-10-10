@@ -36,9 +36,9 @@ springdoc:
     display-request-duration: true
 
 app:
-  # Планировщики выключаются одной настройкой. В тестовых контекстах это обязательно: иначе дневной свип и
-  # еженедельный обход справочника регистрируются в каждом @SpringBootTest, и тест, случайно дожившийся до
-  # нужного часа, начнёт ходить во внешний API.
+  # One setting turns the schedulers off. In the test contexts this is mandatory: otherwise the
+  # daily sweep and the weekly currency import are registered in every @SpringBootTest, and a test
+  # that happens to be alive in the right hour starts calling the external API.
   scheduling:
     enabled: true
 
@@ -48,19 +48,29 @@ app:
 
   ledger:
     currency-code: USD
-    # Знаков после запятой у денежной суммы.
+    # Decimal places of a money amount.
     amount-scale: 2
 
 
-  # Это именно кэш, а не второй источник истины: база отвечает и сама по себе, а недоступный Redis
-  # стоит одного лишнего обращения и ничего больше. enabled: false отключает обращения к Redis
-  # целиком — все пути продолжают работать, поэтому выключить в окружении без Redis безопасно.
+  # This is a cache, not a second source of truth: the database answers on its own, and an
+  # unreachable Redis costs one extra lookup and nothing more. enabled: false skips Redis
+  # entirely — every path keeps working, so turning it off in an environment without Redis is safe.
   cache:
     enabled: true
     ttl: 12h
-    # Префикс ключей: общий Redis не должен получать наши ключи в корень.
+    # Key prefix: a shared Redis should not receive our keys at its root.
     key-prefix: "financial:rate:"
 
+  # The hour the daily rate sweep runs, in the month timezone above.
+  #
+  # 07:00 is chosen so the sweep never races the provider. The US session closes around 21:00 UTC,
+  # and a provider publishes the daily close after that; by 07:00 the value for the day before is
+  # already there, so the sweep reads a number instead of learning there is none. Fetching earlier
+  # would spend a request on a file that has not appeared yet.
+  #
+  # The sweep reads the rate for the first day of the month, not for the day it runs on, so the
+  # offset to "yesterday's close" does not matter here: the 1st's close has been available for days.
+  # It also lands inside the working morning in both markets the specification names.
   scheduled-fetch-hour: 7
 
   rates:
@@ -73,18 +83,18 @@ app:
     attempts: 3
     retry-backoff: 500ms
 
-  # Валюты, курсы по которым дневной планировщик опрашивает заранее, живут в таблице currency_pair,
-  # а не здесь: оператор должен уметь добавить или убрать валюту без релиза, а каждый запрос к внешнему
-  # API платный. В таблице хранится только базовая валюта — цитата подставляется из app.ledger выше, и
-  # поэтому перевод учёта на другую валюту эту таблицу не затрагивает.
+  # The currencies the daily sweep prefetches rates for live in the currency_pair table, not here:
+  # an operator must be able to add or retire one without a release, and every call to the
+  # external API is paid for. The table stores the base currency only — the quote comes from
+  # app.ledger above, so moving the ledger to another currency does not touch this table.
   #
-  # Валюта вне этого списка не запрещена: её курс будет взят по требованию при первой же транзакции.
-  # Список решает только, что уже прогрето.
+  # A currency outside this list is not refused: its rate is fetched on demand by the first
+  # transaction that needs it. The list decides only what is already warm.
   #
-  # Включённость самих задач по расписанию — тоже в базе, в таблице scheduled_job, а не здесь.
-  # @ConditionalOnProperty вычисляется один раз при старте контекста, поэтому переключатель на
-  # свойстве означал бы перезапуск — а выключить платный обход значит сэкономить, и перезапуск для
-  # этого неуместен. Строка в базе меняется UPDATE-ом и видна всем репликам сразу.
+  # Whether the scheduled jobs themselves run is a row in the scheduled_job table, not a property
+  # here. @ConditionalOnProperty is evaluated once when the context starts, so a property would
+  # mean a restart to switch off something that costs money, and a value in memory would apply to
+  # only the replica it was set on. A row is an UPDATE and every replica reads the same one.
 
   # Request quotas. The annotation on a handler names one of these blocks; the numbers declared on the
   # annotation are only a fallback, so a new limited endpoint is never silently unlimited.
