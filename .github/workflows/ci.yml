@@ -33,7 +33,11 @@ jobs:
     # failed in zero seconds with no jobs at all, and a failure that quick is not one
     # anybody is watching for: it survived from the commit that introduced this pipeline.
     #
-    # The action checks out and sets up the JDK itself, so repeating either here would
-    # run them twice for no gain.
+    # The action sets the JDK up itself, but the checkout is repeated here and cannot be
+    # left out: a local action is a path on the runner, so the repository has to be on
+    # disk before it resolves. Without this the job fails with "Can't find 'action.yml'
+    # under ... Did you forget to run actions/checkout before running your local action?"
     steps:
+      - uses: actions/checkout@v5
+
       - uses: ./.github/actions/ci
