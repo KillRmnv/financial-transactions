@@ -228,6 +228,43 @@ Where each lives:
 - **The automatic 1000 USD fallback is dated at the epoch** (`to_timestamp(0)`), not at "now". A transaction can arrive dated before the service ever heard of the client — the specification's own tables do exactly this — and "now" as the installation date would leave that transaction with no limit to compare against. the backdated scenario in `features/service/limit_flag_scenario.feature` covers it; the first implementation stamped it with the current time and 500 on every backdated request.
 - Because of that epoch date, `ReportingService` reports `limitDatetime` as **null** for the automatic fallback. Telling a client 1000 USD was installed on 1 January 1970 would be worse than saying nothing.
 
+## The batch endpoint (optional point 1*)
+
+`POST /api/v1/transactions/batch` takes up to 100 transactions and splits the work into two phases.
+**Only the first one is concurrent, and which one it is is the design.**
+
+- **Preparing** resolves the category, the currency and the exchange rate, one virtual thread per
+  transaction. The rate is the slow part — an uncached currency costs an external call measured in
+  seconds — and the tasks are independent, so there is nothing to gain by ordering them.
+- **Storing** runs sequentially, each transaction in its own `TransactionTemplate` transaction. Two
+  transactions of one account and category contend for the same limit row, and `PESSIMISTIC_WRITE`
+  serialises them regardless; running them on separate threads would pay for scheduling to arrive at
+  the queue the lock already imposes. `features/api/client_api.feature` asserts the batch answers the
+  same as the same transactions sent one by one.
+
+**A virtual thread does not inherit the caller's transaction**, so `prepare` runs inside an explicit
+`TransactionTemplate.execute` rather than reading outside one. `@Transactional` is not an option for
+the same reason and a second one: a self-invocation is not proxied.
+
+**`prepare` writes, and that is a real race the batch exposed.** `convert` stores the rate it fetched,
+so three KZT transactions in one batch share one provider call through `RateFetchCoordinator` and all
+three then write the same row. With the old find-then-write the first inserted it and the other two hit
+`ux_currency_rate_base_date` — which surfaces as `UnexpectedRollbackException` from the commit, naming
+neither the constraint nor the transaction. `CurrencyRateRepository.upsert` is one
+`insert … on conflict do update` statement, so the race has no failure mode to reach. The single-request
+path cannot see this: it never runs two writers for the same pair at once.
+
+**Two `Duration` beans make every injection point ambiguous**, and Spring answers that at startup with
+`NoUniqueBeanDefinitionException` naming neither candidate. `RateTimeouts` is one record carrying both
+bounds, derived from the provider's own timeouts rather than written as numbers.
+
+**`@NotEmpty` and `@Size` on a handler parameter turn on method validation for the whole parameter**, so
+a bad amount inside a batch arrives as `HandlerMethodValidationException` rather than as
+`MethodArgumentNotValidException` — and Spring answers the first with a `ProblemDetail` that has no
+`type` URN. `GlobalExceptionHandler` overrides it so a refused batch is the same shape as any other
+error. Declaring the bounds is worth that: without them a batch is unbounded in size and holds the
+request thread for as long as the provider takes.
+
 ## Currencies
 
 - **The currency code is a verified reference, not a string.** `expense_transaction.currency_id` and `expense_limit.currency_id` are foreign keys to the `currency` lookup, and `currency_rate.base_currency` references `currency(code)`. Never store a raw code in a new column.
@@ -311,7 +348,7 @@ Two workflows, split by cost. The split is about *your* wait time, not a quota.
 
 `.gitignore` ignores `.env*` and then re-admits `.env.example` with a negation, so a future `.env.production` is covered automatically while the template stays tracked. **`.env.example` must never contain real credentials.**
 
-Known gaps: a single rates provider with no failover, no MCP server over this API (optional in the spec), no per-transaction parallelism across a client's currencies (optional point 1*, and the daily sweep does it), the cache is not warmed. The skill at `.agents/skills/changing-limit-behaviour/SKILL.md` (with `.claude/skills` symlinked to `.agents/skills`, so both harnesses find it) covers the flag rule, the lock and the fallback; it is deliberately about one area rather than a summary of `AGENTS.md`.
+Known gaps: a single rates provider with no failover, no MCP server over this API (optional in the spec), the cache is not warmed. The repository is **private**, so requirement 10 is not formally met — a deliberate choice for code carrying a paid provider integration, noted in `README.md` so it is a stated decision rather than a silent omission. The skill at `.agents/skills/changing-limit-behaviour/SKILL.md` (with `.claude/skills` symlinked to `.agents/skills`, so both harnesses find it) covers the flag rule, the lock and the fallback; it is deliberately about one area rather than a summary of `AGENTS.md`.
 
 **The period without commits cost real work once.** Every file was untracked, so an `rm -rf src/test/java/com/idfinance` — meant for a fixtures package inside that tree — took the twenty-one test sources with it and there was nothing to restore from. They came back by decompiling `target/test-classes`, which recovered the logic and lost the comments, and the surviving `features/*.feature` files were what made the behaviour verifiable afterwards. Before any `rm -rf` inside `src/`, check `find <path> -type f | wc -l` and `git ls-files <path>`; `git status` on an untracked tree tells you nothing useful.
 

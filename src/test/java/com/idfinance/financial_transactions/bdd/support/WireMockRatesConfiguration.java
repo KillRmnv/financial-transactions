@@ -5,7 +5,9 @@ import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.idfinance.financial_transactions.config.AppProperties;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -66,6 +68,12 @@ public class WireMockRatesConfiguration {
 
 		private final WireMockServer server;
 
+		/**
+		 * Every close published so far, so {@link #answeringAfter} can re-register them
+		 * with a delay.
+		 */
+		private final List<ServedRate> published = new ArrayList<>();
+
 		HttpRatesStub(WireMockServer server) {
 			this.server = server;
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/currency")).willReturn(WireMock.okJson("""
@@ -77,12 +85,39 @@ public class WireMockRatesConfiguration {
 		 * {@code values[]} with {@code close} and {@code previous_close}.
 		 */
 		public void closeOn(String baseCurrency, String quoteCurrency, LocalDate date, BigDecimal close) {
-			String symbol = baseCurrency + "/" + quoteCurrency;
 			String body = """
 					{"values":[{"close":%s,"previous_close":null}]}""".formatted(close.toPlainString());
+			this.published.add(new ServedRate(baseCurrency, quoteCurrency, date, body));
+			answer(baseCurrency, quoteCurrency, date, body, Duration.ZERO);
+		}
+
+		/**
+		 * Re-registers every close published so far with a delay before the answer is
+		 * sent.
+		 *
+		 * <p>
+		 * The single-flight coordinator collapses a provider call only while that call
+		 * is still in flight, and a WireMock stub that answers instantly is finished
+		 * before the next task begins. A scenario asserting that a pair asked about
+		 * three times costs one call therefore depends on scheduling, and passes or
+		 * fails on how busy the machine happens to be. Making the provider slow is what
+		 * turns the overlap into the thing under test rather than a race.
+		 */
+		public void answeringAfter(Duration delay) {
+			this.published.forEach((rate) -> answer(rate.base(), rate.quote(), rate.date(), rate.body(), delay));
+		}
+
+		private void answer(String baseCurrency, String quoteCurrency, LocalDate date, String body, Duration delay) {
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
-					.withQueryParam("symbol", WireMock.equalTo(symbol))
-					.withQueryParam("date", WireMock.equalTo(date.toString())).willReturn(WireMock.okJson(body)));
+					.withQueryParam("symbol", WireMock.equalTo(baseCurrency + "/" + quoteCurrency))
+					.withQueryParam("date", WireMock.equalTo(date.toString()))
+					.willReturn(WireMock.okJson(body).withFixedDelay((int) delay.toMillis())));
+		}
+
+		/**
+		 * A close as published, kept so it can be re-registered with a delay.
+		 */
+		private record ServedRate(String base, String quote, LocalDate date, String body) {
 		}
 
 		/**
@@ -122,6 +157,7 @@ public class WireMockRatesConfiguration {
 
 		public void reset() {
 			this.server.resetAll();
+			this.published.clear();
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/currency")).willReturn(WireMock.okJson("""
 					{"data":[{"code":"KZT","name":"Kazakhstani Tenge"},{"code":"RUB","name":"Russian Ruble"}]}""")));
 		}

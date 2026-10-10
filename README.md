@@ -336,6 +336,15 @@ Ingestion, for the bank's systems:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/v1/transactions` | accept one expense operation |
+| `POST` | `/api/v1/transactions/batch` | accept up to 100 at once, resolving their rates concurrently |
+
+The batch takes the same body as an array of it and answers with an array of the same responses, in
+the order they were sent. Only the rate lookups run concurrently; the flag for each transaction is
+still decided one at a time under the limit's row lock, so a batch gets the same answers as the same
+transactions posted individually and in the same order. A transaction in a currency with no available
+rate is stored with `limitCalculated` false rather than rejecting the batch; an unknown currency does
+reject it, because by then the earlier transactions are already stored and a partial write reported as
+a failure would be a lie.
 
 ```json
 {
@@ -527,15 +536,15 @@ different agents read two different formats:
 | **PostgreSQL** | `~/.config/opencode/opencode.jsonc` (personal) | read-only SQL against the development database, so an agent reads the real schema instead of guessing column names |
 | **GitHub** | `~/.config/opencode/opencode.jsonc` (personal) | issues, pull requests and CI runs, which is also what makes publishing this repository possible |
 
-`.mcp.json` at the repository root holds the same two servers in **Claude Code's** format. It is kept
+`.mcp.json` at the repository root holds the same three servers in **Claude Code's** format. It is kept
 because Claude Code is a different host reading a different file, not as an accident: OpenCode ignores
 it entirely, and `opencode mcp list` answering *No MCP servers configured* is how that was found.
 
 Two details that cost time, both recorded in `AGENTS.md`:
 
 - **`@crystaldba/postgres-mcp` no longer exists on npm.** The registry answers 404, and the failure
-  presents as a server that "exited with code 1" rather than as a missing package. The replacement is
-  `@contextflo/postgres-mcp`.
+  presents as a server that "exited with code 1" rather than as a missing package. Both config files
+  name `@contextflo/postgres-mcp`.
 - **The remote GitHub server needs Copilot.** `https://api.githubcopilot.com/mcp/` answers 403 to a
   plain `gh` token — which works fine against `api.github.com`. The configured one is the local Docker
   image, which takes the same token.
@@ -606,10 +615,11 @@ Two places where the estimate would have been wrong, which is the useful part:
   Had the tests been written from the table rather than from the flag column, they would have
   asserted a wrong number and passed.
 
-Of the specification's optional points, the rate cache (2\*), the Docker packaging (3\*) and the CI
-pipeline (4\*) are done. The virtual-thread parallelism for a client's currencies (1\*) is done for the
-daily sweep; the per-transaction side is not, and the honest reason is in `Known gaps` below along
-with the MCP server (7\*).
+Of the specification's optional points, the rate cache (2\*), the Docker packaging (3\*), the CI
+pipeline (4\*), the single-flight fetch coordinator (5\*) and the virtual-thread parallelism for a
+client's currencies (1\*) are done. 1\* is done on both sides: the daily sweep fetches every pair
+concurrently, and `POST /api/v1/transactions/batch` resolves a client's transactions concurrently. The
+7\* MCP server and the 8\* items are not, and the reasons are in `Known gaps` below.
 
 ## Accounts
 
@@ -628,3 +638,8 @@ that is already unique by definition would be structure without a question behin
   and only later ones hit Redis. A read-through cache cannot avoid that without knowing the future.
 - `exchange_rate` has no index on `(base_currency, rate_date)` beyond its unique constraint; the
   lookup is already served by it, but a wider index may earn its place under real volume.
+- **The repository is private, so requirement 10 is not formally met.** It was a deliberate choice
+  rather than an oversight: the specification describes a commercial service with an external paid rate
+  provider, and publishing the schema, the provider integration and the deployment configuration is a
+  decision for whoever owns the code. Making it public is one click in the repository settings — and
+  the one thing to check before doing so is `.env.example`.

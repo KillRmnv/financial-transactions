@@ -133,10 +133,15 @@ Feature: The client-facing API over HTTP
     And the 3rd stored transaction totals "250.50" USD
     And 3 transactions are stored
 
+  # Three transactions in one batch need one provider call, not three. The provider is made slow on
+  # purpose: the coordinator collapses a call only while it is still in flight, and an instant answer is
+  # finished before the next transaction starts asking — the assertion would then depend on how busy the
+  # machine is rather than on the code.
   Scenario: A batch asks the provider once for a pair it is asked twice about
     Given the account "0000000482" and the category "product"
     And a limit of "1000" USD was installed on "2022-01-01"
     And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And the provider answers slowly
     When a batch is posted with these transactions:
       | currency | sum   | date       |
       | KZT      | 400   | 2022-01-05 |

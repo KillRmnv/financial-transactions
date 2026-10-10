@@ -5,6 +5,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
@@ -139,6 +141,45 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 
 		return ResponseEntity.badRequest()
 				.body(problemDetail(HttpStatus.BAD_REQUEST, "malformed-request", MALFORMED_BODY_DETAIL, request));
+	}
+
+	/**
+	 * Constraints declared on the handler's parameters rather than on the body.
+	 *
+	 * <p>
+	 * Spring answers these with its own {@code ProblemDetail} — a 400 with a
+	 * generic detail and no {@code type} URN — so a batch that was empty or too
+	 * large used to be reported in a different shape from a batch whose transaction
+	 * carried a bad amount. Two ways of saying the same thing to a caller is one
+	 * way too many: a client parsing {@code type} has to special-case this
+	 * endpoint, and the inconsistency is invisible in tests that assert only the
+	 * status.
+	 *
+	 * <p>
+	 * Declaring {@code @NotEmpty} or {@code @Size} on the parameter is what turns
+	 * on method validation for the whole parameter, so a bad amount inside a batch
+	 * arrives here rather than through {@link #handleMethodArgumentNotValid}. The
+	 * constraint keeps its own path to a problem body here, and the element path it
+	 * displaces is answered in the same shape.
+	 */
+	@Override
+	protected ResponseEntity<Object> handleHandlerMethodValidationException(HandlerMethodValidationException ex,
+			HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+		List<FieldViolation> violations = ex.getParameterValidationResults().stream().flatMap((result) -> {
+			String parameter = result.getMethodParameter().getParameterName();
+			return result.getResolvableErrors().stream().map((error) -> toViolation(parameter, error));
+		}).toList();
+
+		ProblemDetail body = problemDetail(HttpStatus.BAD_REQUEST, "validation-failed", "The request body is not valid",
+				request);
+		body.setProperty("errors", violations);
+
+		return ResponseEntity.badRequest().body(body);
+	}
+
+	private static FieldViolation toViolation(String parameter, MessageSourceResolvable error) {
+		String message = Optional.ofNullable(error.getDefaultMessage()).orElse(INVALID_FIELD_DETAIL);
+		return new FieldViolation(parameter, message);
 	}
 
 	/**

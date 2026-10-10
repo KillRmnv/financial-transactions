@@ -4,7 +4,6 @@ import com.idfinance.financial_transactions.cache.RateCache;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
-import com.idfinance.financial_transactions.entity.CurrencyRate;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import java.math.BigDecimal;
@@ -155,27 +154,33 @@ public class ExchangeRateService {
 		}
 	}
 
+	/**
+	 * Writes the rate, or refreshes the row that is already there.
+	 *
+	 * <p>
+	 * One native statement rather than a find-then-write, because two transactions
+	 * can legitimately reach here for the same pair and day: a batch resolves its
+	 * rates in parallel and three KZT transactions share one provider call through
+	 * {@link RateFetchCoordinator}, then all three store what they were handed. A
+	 * find-then-write has the first insert the row and the other two fail on
+	 * {@code ux_currency_rate_base_date}, and the failure arrives from the commit
+	 * as {@code UnexpectedRollbackException} rather than as the constraint
+	 * violation that actually happened.
+	 */
 	@Transactional
-	public CurrencyRate store(Currency currency, ExchangeRate rate) {
+	public void store(Currency currency, ExchangeRate rate) {
 		String provider = this.ratesProvider.name();
-		CurrencyRate stored = this.currencyRateRepository.findForDay(currency, rate.rateDate()).map(existing -> {
-			existing.refresh(rate.close(), rate.previousClose());
-			log.debug("Refreshed the {} rate for {}: {}", currency.getCode(), rate.rateDate(), rate.effectiveRate());
-			return existing;
-		}).orElseGet(() -> {
-			CurrencyRate row = this.currencyRateRepository
-					.save(new CurrencyRate(currency, rate.rateDate(), rate.close(), rate.previousClose(), provider));
-			log.info("Stored a new {} rate for {}: {} (from {})", currency.getCode(), rate.rateDate(),
-					rate.effectiveRate(), provider);
-			return row;
-		});
+		boolean inserted = this.currencyRateRepository.upsert(currency.getCode(), rate.rateDate(), rate.close(),
+				rate.previousClose(), provider) > 0;
+		log.debug("{} the {} rate for {}: {}", inserted ? "Stored" : "Refreshed", currency.getCode(), rate.rateDate(),
+				rate.effectiveRate());
+
 		// Whatever was cached for this pair described the row that has just changed.
 		// The generation
 		// bump retires all of it at once, including entries cached under later days
 		// that this rate
 		// answered through findLatestOnOrBefore.
 		this.rateCache.invalidatePair(currency.getCode(), this.ledgerPolicy.currencyCode());
-		return stored;
 	}
 
 	/**

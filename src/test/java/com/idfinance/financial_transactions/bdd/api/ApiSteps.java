@@ -13,6 +13,7 @@ import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -375,6 +376,16 @@ class ApiSteps {
 	 * reason the concurrent step is: the point is the request shape, and a table
 	 * would put a cucumber feature in charge of JSON.
 	 */
+	/**
+	 * Makes the provider slow enough that the batch's rate lookups are provably in
+	 * flight together, which is the condition the single-flight coordinator needs
+	 * and the one an instant stub never creates.
+	 */
+	@Given("the provider answers slowly")
+	void theProviderAnswersSlowly() {
+		this.ratesStub.answeringAfter(Duration.ofMillis(400));
+	}
+
 	@When("a batch is posted with these transactions:")
 	void aBatchIsPosted(DataTable table) {
 		List<Map<String, Object>> body = table.asMaps(String.class, String.class).stream().map((row) -> {
@@ -419,9 +430,9 @@ class ApiSteps {
 	}
 
 	@Then("the provider was asked {int} times for the symbol {string}")
-	void theProviderWasAskedTimesFor(String times, String symbol) {
+	void theProviderWasAskedTimesFor(int times, String symbol) {
 		long count = this.ratesStub.requestedSymbols().stream().filter((requested) -> requested.equals(symbol)).count();
-		Assertions.assertThat(count).as("how many external calls for %s", symbol).isEqualTo(Long.parseLong(times));
+		Assertions.assertThat(count).as("how many external calls for %s", symbol).isEqualTo(times);
 	}
 
 	@Then(value = "the provider was asked for the symbol {string}")
