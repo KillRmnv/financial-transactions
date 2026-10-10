@@ -1,12 +1,9 @@
 package com.idfinance.financial_transactions.client;
 
-import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.ScheduledJob;
-import com.idfinance.financial_transactions.repository.CurrencyRepository;
+import com.idfinance.financial_transactions.service.CurrencyImporter;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import com.idfinance.financial_transactions.service.ScheduledJobService;
-import java.util.List;
-import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -16,7 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Adds currencies that appeared after the seed in the migration.
+ * Adds currencies that appeared after the seed in the migration, once a week.
  *
  * <p>
  * Weekly rather than daily: new ISO 4217 codes are rare, and a daily sweep of a
@@ -38,14 +35,18 @@ import org.springframework.transaction.annotation.Transactional;
  * on, so a deployment that does nothing keeps today's behaviour.
  *
  * <p>
- * Note what switching it off costs: an ISO 4217 code introduced after the seed
- * stays unaccepted until a migration adds it, because this is the only writer
- * of the lookup apart from the migration. The specification names only KZT and
- * RUB, and both are seeded, so nothing the assignment asks for is affected.
+ * Note what switching it off costs: an ISO 4217 code introduced after this
+ * deployment started stays unaccepted until the code is added by hand, because
+ * {@code CurrencyBootstrap} only reads what the provider published when the
+ * service came up. The specification names only KZT and RUB, and both are
+ * seeded, so nothing the assignment asks for is affected.
  *
  * <p>
- * Only active when a provider is configured; with {@link NoRatesProvider} in
- * place there is nothing to sweep, and the seeded list stands on its own.
+ * The import itself is {@link CurrencyImporter}, which
+ * {@code CurrencyBootstrap} also calls at startup; this class is only the
+ * schedule. It was the loop itself until the startup import needed the same
+ * one, and living in {@code client} it was in the wrong package for what it
+ * does.
  */
 @Component
 @ConditionalOnBean(RatesProvider.class)
@@ -56,9 +57,9 @@ public class WeeklyCurrencyImport {
 
 	private final RatesProvider ratesProvider;
 
-	private final CurrencyRepository currencyRepository;
-
 	private final ScheduledJobService scheduledJobService;
+
+	private final CurrencyImporter currencyImporter;
 
 	@Scheduled(cron = "0 30 4 * * MON", zone = "${app.month-timezone}")
 	@Transactional
@@ -76,40 +77,7 @@ public class WeeklyCurrencyImport {
 			return;
 		}
 
-		List<RatesProvider.PublishedCurrency> published;
-		try {
-			published = this.ratesProvider.publishedCurrencies();
-		} catch (RuntimeException ex) {
-			log.warn("Could not list the currencies published by {}: {}", this.ratesProvider.name(), ex.getMessage());
-			return;
-		}
-
-		int added = 0;
-		for (RatesProvider.PublishedCurrency entry : published) {
-			String code = normalize(entry.code());
-			if (code == null) {
-				continue;
-			}
-			if (this.currencyRepository.existsByCode(code)) {
-				continue;
-			}
-			this.currencyRepository.save(new Currency(code, entry.displayName()));
-			added++;
-			log.info("Added the currency {} from {}", code, this.ratesProvider.name());
-		}
-		log.info("Currency sweep finished, {} new codes from {}", added, this.ratesProvider.name());
-	}
-
-	/**
-	 * @return the uppercase code, or null when the entry is not a usable ISO 4217
-	 *         code
-	 */
-	private static String normalize(String rawCode) {
-		if (rawCode == null) {
-			return null;
-		}
-		String code = rawCode.trim().toUpperCase(Locale.ROOT);
-		return code.matches("^[A-Z]{3}$") ? code : null;
+		this.currencyImporter.importPublished();
 	}
 
 }

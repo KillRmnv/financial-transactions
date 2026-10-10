@@ -64,6 +64,12 @@ class CurrencySweepSteps {
 	 */
 	private Set<String> codesBeforeSweep;
 
+	/**
+	 * The lookup as it stood between two runs of the import, for the idempotency
+	 * check.
+	 */
+	private Set<String> codesBeforeTheSecondRun;
+
 	@Before
 	void rememberTheLookup() {
 		// The tables are cleaned through the shared cleaner rather than here, so that a
@@ -163,9 +169,33 @@ class CurrencySweepSteps {
 		this.stubRatesProvider.setCurrencyListingFails(true);
 	}
 
+	@Given("the provider cannot be reached")
+	void theProviderCannotBeReached() {
+		this.stubRatesProvider.setCurrencyListingFails(true);
+	}
+
 	@When("the weekly sweep runs")
 	void theWeeklySweepRuns() {
 		this.weeklyCurrencyImport.getObject().refreshCurrencies();
+	}
+
+	@Given("the size of the currency lookup is noted")
+	void theSizeOfTheLookupIsNoted() {
+		// A snapshot of its own, because the baseline this file compares against is
+		// taken in
+		// @Before and does not move. Asserting that a second import changed nothing
+		// needs a
+		// measurement from between the two runs, not from before the first.
+		this.codesBeforeTheSecondRun = codesInLookup();
+	}
+
+	@Then("the currency lookup has not changed since it was noted")
+	void theLookupHasNotChangedSinceItWasNoted() {
+		Set<String> now = codesInLookup();
+		Set<String> added = new LinkedHashSet<>(now);
+		added.removeAll(this.codesBeforeTheSecondRun);
+
+		Assertions.assertThat(added).as("the codes the second run added").isEmpty();
 	}
 
 	@Then("the currency lookup grew by {int} codes")

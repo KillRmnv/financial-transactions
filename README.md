@@ -37,11 +37,24 @@ The currency code is a **verified reference, not a string**.
 `currency` lookup table, and `currency_rate.base_currency` references `currency(code)`.
 
 The schema refuses a lowercase code outright, so `kzt` cannot end up as a second currency
-next to `KZT` — that is the entire point of the table. The lookup is seeded in
-`V1__init.sql` with the active ISO 4217 codes, and
-`WeeklyCurrencyImport` adds codes that appear later. It runs weekly rather than daily: new
-codes are rare and the endpoint is paid. A transaction in a code not yet in the lookup is
-refused with 404 until the next sweep.
+next to `KZT` — that is the entire point of the table.
+
+**What the migration seeds is three codes**: `USD`, because it is the ledger currency and
+every limit amount refers to it, and `KZT` and `RUB`, which the specification names. The rest of
+ISO 4217 used to be 157 rows inside `V1__init.sql` — data in a file whose job is to describe a
+schema, duplicating something the code already knew how to do, going stale while an applied Flyway
+file cannot be rewritten. It is gone. `CurrencyBootstrap` reads the provider's currency list when
+the service comes up, and `WeeklyCurrencyImport` refreshes it weekly: new codes are rare and the
+endpoint is paid, so a weekly sweep rather than a daily one. Both call the same
+`CurrencyImporter`.
+
+The bootstrap **does not hold the startup**. It hands its work to a virtual thread once the context
+is ready, because the alternative is a service that starts only when the rate provider answers, and
+this project is built so that a provider outage is not an outage here. The cost is that a
+transaction in a currency published minutes ago is refused with 404 for a few seconds — which is
+what it gets on any deployment with no provider configured at all, where the lookup stays at three
+codes. Both write with `insert … on conflict do nothing`, so the import is idempotent and several
+replicas starting at once do not race each other into a constraint violation.
 
 Two further things pull in different directions and are kept separate:
 

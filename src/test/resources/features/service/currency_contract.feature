@@ -10,8 +10,13 @@ Feature: The currency code is a verified reference
 
   Scenario: The seeded lookup holds the currencies the specification names
     Then the currency lookup contains "KZT", "RUB" and "USD"
-    And the currency lookup holds more than 150 codes
     And every code in the lookup is uppercase
+
+  # The lookup used to be checked for holding "more than 150 codes" — an assertion that the ISO 4217
+  # list had been pasted into the migration. It is now the provider's list plus what the scenarios
+  # need, and what the code guarantees is that every one of them is a well-formed uppercase code.
+  Scenario: Every code in the lookup came through a check the schema enforces
+    Then every code in the lookup is three uppercase letters
 
   Scenario Outline: The schema refuses a code that is not three uppercase letters
     When a currency "<code>" is inserted directly

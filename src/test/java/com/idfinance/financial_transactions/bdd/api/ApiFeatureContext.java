@@ -2,6 +2,7 @@ package com.idfinance.financial_transactions.bdd.api;
 
 import com.idfinance.financial_transactions.TestcontainersConfiguration;
 import com.idfinance.financial_transactions.bdd.support.BddInfrastructureConfiguration;
+import com.idfinance.financial_transactions.bdd.support.TestCurrencyLookup;
 import com.idfinance.financial_transactions.bdd.support.WireMockRatesConfiguration;
 import io.cucumber.spring.CucumberContextConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,7 +25,7 @@ import org.springframework.context.annotation.Import;
 
 @CucumberContextConfiguration
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(value = {TestcontainersConfiguration.class, BddInfrastructureConfiguration.class,
+@Import(value = {TestcontainersConfiguration.class, BddInfrastructureConfiguration.class, TestCurrencyLookup.class,
 		WireMockRatesConfiguration.class})
 public class ApiFeatureContext {
 }

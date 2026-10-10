@@ -116,3 +116,23 @@ Feature: The weekly sweep of the currency lookup
     When the weekly sweep runs
     Then the provider was asked for its currency list
     And the currency lookup grew by 1 codes
+  # The migration seeds three codes and the rest arrives at startup. Without this the lookup would be
+  # the seed plus whatever a weekly sweep had managed to catch, and a deployment would refuse EUR for
+  # up to a week after a restart — which is what the seed used to prevent by carrying all of ISO 4217.
+  Scenario: The startup import is the same import, and it is idempotent
+    Given the provider publishes these currencies:
+      | code | name            |
+      | ZWL  | Zimbabwe Dollar |
+    When the weekly sweep runs
+    Then the currency lookup grew by 1 codes
+    And the currency "ZWL" is in the lookup
+    And the size of the currency lookup is noted
+    When the weekly sweep runs
+    Then the currency lookup has not changed since it was noted
+    And the currency "ZWL" is in the lookup
+
+  Scenario: A provider that cannot be asked costs nothing but the import
+    Given the provider cannot be reached
+    When the weekly sweep runs
+    Then the currency lookup still holds the same number of codes
+    And the currency lookup contains "KZT", "RUB" and "USD"

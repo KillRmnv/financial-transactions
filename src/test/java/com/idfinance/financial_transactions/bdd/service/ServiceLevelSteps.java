@@ -550,6 +550,20 @@ class ServiceLevelSteps {
 		Assertions.assertThat(lowercase).as("codes the schema should have refused").isEmpty();
 	}
 
+	/**
+	 * Stricter than the uppercase check on purpose. {@code ck_currency_code_shape}
+	 * is the constraint that decides what the lookup may hold, and a code that is
+	 * uppercase but two letters long is the one a lookup built by hand would
+	 * eventually grow.
+	 */
+	@Then("every code in the lookup is three uppercase letters")
+	void everyCodeInTheLookupIsThreeUppercaseLetters() {
+		List<String> malformed = this.currencyRepository.findAll().stream().map(Currency::getCode)
+				.filter((code) -> !code.matches("^[A-Z]{3}$")).toList();
+
+		Assertions.assertThat(malformed).as("codes ck_currency_code_shape should have refused").isEmpty();
+	}
+
 	@When("a currency {string} is inserted directly")
 	void aCurrencyIsInsertedDirectly(String code) {
 		// ck_currency_code_uppercase and ck_currency_code_shape refuse this. The
