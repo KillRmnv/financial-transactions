@@ -11,6 +11,9 @@ Spring Boot 4.0.8 / Java 25 Maven microservice for monthly USD spend limits and 
 
 Where this file and that document disagree, the document wins.
 
+`README.md` describes the project; everything else is in `docs/`, in Russian. This file is the
+third thing and overlaps with neither: it is what an agent needs *before* touching anything.
+
 ## Toolchain: JDK and the Lombok pin
 
 The pom sets `<java.version>25</java.version>`, but only two JDKs are installed here: **21** (`/usr/lib/jvm/java-21-openjdk`, which is also `JAVA_HOME=/usr/lib/jvm/default`) and **27** (`/usr/lib/jvm/java-27-openjdk`). `javac` 21 rejects `--release 25` outright, so **JDK 27 is the only usable JDK locally**; CI installs JDK 25 because that is what the pom targets. A CI-only failure that looks like a compilation or annotation-processing bug is usually that difference.
@@ -80,7 +83,7 @@ Records stay records — Lombok is for what records cannot express. Do not add `
 - **Never write a response body from an interceptor or a filter.** They have no message converters, and serialising a `ProblemDetail` there produces a body that differs from the handler's. Throw a domain exception and let `GlobalExceptionHandler` render it — the rate limiter does exactly this with `RateLimitExceededException`, which is also why it extends `DomainException`.
 - Every error leaves the API as `ProblemDetail` (RFC 9457): `type` URN, `title`, `status`, `detail`, `instance`. Bean Validation failures add the field-level violations.
 - Domain exceptions live in the `exception` package. The **handler** decides the HTTP status — services must not import `HttpStatus`, construct a `ProblemDetail`, or return `ResponseEntity`.
-- No `try/catch` around external HTTP calls in services. The rates-client adapter turns transport failures into a domain exception; the retry/timeout strategy lives in `TwelveDataRatesProvider` and is described in `README.md`.
+- No `try/catch` around external HTTP calls in services. The rates-client adapter turns transport failures into a domain exception; the retry/timeout strategy lives in `TwelveDataRatesProvider` and is described in `docs/currencies.md`.
 - **Never hardcode the ledger currency.** `USD` appears in the specification, not in the code: `config/LedgerPolicy` carries it (`app.ledger.currency-code`) together with `amountScale` (`app.ledger.amount-scale`), and `LedgerPolicy.round(...)` is the one place an amount is rounded. Reintroducing a `LEDGER_CURRENCY` constant — in a service, or worse in `domain/ExchangeRate` — undoes the whole point. The same goes for `USD` in test stubs: `BddInfrastructureConfiguration` reads `LedgerPolicy` for exactly that reason.
 - **`LedgerPolicy` validates its own binding.** The code is checked against `^[A-Z]{3}$` in the compact constructor, so a typo in a property fails at startup instead of surfacing later as an empty currency lookup.
 
@@ -204,7 +207,7 @@ Where each lives:
 ## Domain rules that are easy to get wrong
 
 - A limit applies only from its installation datetime forward; a new limit does not retroactively change the flag on earlier transactions.
-- Monthly boundaries are computed in **one** explicitly chosen timezone (`app.month-timezone`, UTC), documented in `README.md`. Transactions arrive with assorted offsets.
+- Monthly boundaries are computed in **one** explicitly chosen timezone (`app.month-timezone`, UTC), documented in `docs/domain-rules.md`. Transactions arrive with assorted offsets.
 - Default limit is **1000 USD** per category when none was set. Categories are exactly `product` and `service`, seeded in the migration.
 - Existing limits cannot be updated — only new ones can be added, and the new limit's datetime is always "now" (`POST /api/v1/limits` has no date field, which is what makes backdating impossible).
 - **The flag rule, verified against all 8 rows of the truth table:** `limit_exceeded = (sum of the month's transactions running total, including this one) > (the limit in effect on the transaction date)`. "In effect" means the latest limit with `created_at <= occurred_at`. In code: `runningTotal.compareTo(limit.getSum()) > 0`.
@@ -269,7 +272,10 @@ request thread for as long as the provider takes.
 
 - **The currency code is a verified reference, not a string.** `expense_transaction.currency_id` and `expense_limit.currency_id` are foreign keys to the `currency` lookup, and `currency_rate.base_currency` references `currency(code)`. Never store a raw code in a new column.
 - **The schema refuses a lowercase code.** `ck_currency_code_uppercase` and `ck_currency_code_shape` make `kzt` impossible to insert, so a typo cannot become a second currency. The currency-contract feature checks that, and checks that the service resolves a lower-case code from a request to the seeded row rather than storing it.
-- **The lookup is seeded in `V1__init.sql`** with the active ISO 4217 codes. `WeeklyCurrencyImport` adds codes that appear later; it runs weekly, not daily, because new codes are rare and the endpoint is paid. A transaction in an unknown code is refused with 404 until the next sweep — that is intended, not an oversight.
+- **The lookup is seeded with three codes in `V1__init.sql`** — `USD`, which every limit amount refers to, and `KZT`/`RUB`, which the specification names. It used to carry all of ISO 4217: 157 rows of data in a file whose job is to describe a schema, going stale in a file Flyway will not let you rewrite. `CurrencyBootstrap` reads the provider's list at startup and `WeeklyCurrencyImport` weekly; both call one `CurrencyImporter`. **A transaction in an unknown code is refused with 404 until then — that is intended, not an oversight**, and it is what an unquoted code deserves.
+- **The import is idempotent in the database, not in the application.** `CurrencyRepository.insertIfAbsent` is one `insert … on conflict do nothing`. An `existsByCode` check followed by a `save` is idempotent for one caller and wrong for two: several replicas start at once, each sees the code missing, and the losers fail on `ux_currency_code`. Every deployment and every weekly sweep runs this, so several callers is the normal case.
+- **`CurrencyBootstrap` does not hold the startup.** It hands its work to a virtual thread on `ApplicationReadyEvent`. The alternative is a service that starts only when the rate provider answers, and this project is built so a provider outage is not an outage here. The cost is that a transaction in a currency published seconds ago gets 404 for a moment — the same answer it gets with no provider configured at all.
+- **An empty answer from the provider is logged.** The free tier replies with an empty body once its quota is spent, which is the same shape as "no currencies", and a lookup that stops growing should not look like a provider with nothing to add.
 - **The currencies swept daily live in the `currency_pair` table, not in `application.yml`.** An operator must be able to add or retire one without a release, and every poll costs money, so what is kept warm is an operational decision rather than a property of the code. `currency_pair.active` drives it; the seed is `KZT` and `RUB`, the bases of the pairs п.3 asks for. `AppProperties` has **no** pairs field any more: adding one back is a regression, not a convenience.
 - **`currency_pair` has no quote column, and never had one worth having.** The quote is `LedgerPolicy.currencyCode()` — a single value — and `currency_rate` stores rates without a quote because it is implied. A stored copy would be a second source of truth that can disagree with the configuration, and the only way to reconcile it is a code-level check on every sweep, which is exactly the `ScheduledRatesFetcher` comparison that was removed for that reason. **Do not add `quote_currency` back.** Being absent from the table is not a rejection: an unlisted currency is accepted and fetched on demand.
 - **`ck_currency_pair_quote_usd` is gone for a second reason.** A CHECK cannot read a property, so pinning the quote in the schema would mean re-editing an applied migration every time the ledger moves. It went when the column went.
@@ -280,6 +286,47 @@ request thread for as long as the provider takes.
 - **Invalidation is a generation counter, not key deletion.** A cached entry is keyed by the day that was *asked for*, and the rate that answered it may be older — `findLatestOnOrBefore` deliberately answers a question about the 5th with the rate of the 1st. So a write has to retire entries cached under later days too. Each pair carries a counter in its key and `store` increments it; finding those keys otherwise needs a `SCAN` or a tracked set. `app.cache.ttl` is the backstop, not the mechanism. **Invalidate where the row is written**, in `ExchangeRateService.store`, which is also the sweep's path: a test that updated the row with SQL would be testing a cache that can never notice a refresh, which is a real way to build this and therefore a bug to catch rather than a fixture to accommodate.
 - **The test cleanup has to cover the cache too.** `StoredWorldCleaner` empties the tables *and* the Redis keys by prefix. It exists because the suites each had their own `@Before` and the cache was the one piece of state those lists missed: the rows were deleted and the answers survived, so a scenario asking for "a currency with no rate anywhere" was answered from the previous scenario's rate. Ten scenarios failed the day the cache landed, and all ten were that.
 - Only `base = transaction currency` is stored; the quote is always USD and has no column. The inverse pair is derived by division, and persisting it would let two rows drift apart.
+
+## The rate provider is not what its documentation says
+
+Everything here was found against the live Twelve Data API with a real key, and none of it was
+visible in the suite: WireMock answers whatever it is given a stub for, so this path had only ever
+been exercised against a provider that was assumed rather than asked.
+
+- **There is no `KZT/USD`.** The symbol does not exist and answers 404 with "symbol or figi
+  parameter is missing or invalid", which reads like a malformed request rather than a missing pair.
+  `USD/KZT` is there. `TwelveDataRatesProvider` therefore asks for the other side and divides —
+  `ExchangeRate.inverted`, in `domain` rather than in the adapter, because a financial rule is not
+  the job of a class that speaks HTTP. **Both sides invert, `previous_close` included**: leaving the
+  fallback upright mixes an upright close with an inverted one and produces a number belonging to
+  neither orientation. A 404 is answered without a retry — asking again cannot create a symbol.
+- **There is no `/currency` endpoint either.** Not on any tier; it answers 404 "page not found". The
+  first version of the adapter called it anyway, so every startup import finished with nothing. The
+  working source is `symbol_search`, which also answers equities and crypto, filtered on the
+  LEDGER/OTHER pair shape.
+- **Take the OTHER side of that pair.** The search is asked about the ledger currency, so every pair
+  is `USD/something` and the base is the same value in every row — reading it yields the ledger
+  itself, the filter that removes it removes everything, and an empty import is indistinguishable in
+  the log from a provider with nothing new.
+- **`previous_close` is not sent at all.** The answer carries exactly `datetime, open, high, low,
+  close`. Reading that field produces null on every request, and п.3's rule for a day with no close
+  never runs — quietly, because the transaction is stored without a flag, which is the right answer
+  to a missing rate and the wrong one to a rate that exists. `fetchOnce` builds the fallback itself
+  out of a second request over a ten-day window, and picks the point by comparing dates rather than
+  by position: this provider answers newest first, and one answering the other way would quietly
+  price the day from the far end of the window.
+- **A day with no close comes back with an empty `values`, not a null close.** The provider omits a
+  closed day from the series, so an empty answer is the holiday case rather than a failure. Both
+  shapes lead to the same fallback; deciding between them would mean deciding which to believe.
+- **`400 "No data is available"` is about the data, not the request.** Matched on the body, not on
+  the status alone: 400 also covers a request this adapter got wrong, and treating that as "no data"
+  turns a bug into a transaction quietly stored without a flag.
+- **The history is about a year and that is the plan, not a bug.** Measured: `2024-01-02` no data,
+  `2025-06-02` data. Every date in the specification is January or February 2022, and the rate is
+  looked up for the **first day of the month**, so `2022-01-01` is what gets asked for. Such a
+  transaction answers `limitCalculated: false`, which is honest rather than broken. The free tier is
+  also 8 requests a minute, and past it the provider replies with an empty body — the transaction is
+  stored unflagged and nothing errors.
 
 ## Accounts
 
@@ -349,7 +396,7 @@ Two workflows, split by cost. The split is about *your* wait time, not a quota.
 
 `.gitignore` ignores `.env*` and then re-admits `.env.example` with a negation, so a future `.env.production` is covered automatically while the template stays tracked. **`.env.example` must never contain real credentials.**
 
-Known gaps: a single rates provider with no failover, no MCP server over this API (optional in the spec), the cache is not warmed. The repository is **private**, so requirement 10 is not formally met — a deliberate choice for code carrying a paid provider integration, noted in `README.md` so it is a stated decision rather than a silent omission. The skills at `.agents/skills/` (with `.claude/skills` symlinked to `.agents/skills`, so both harnesses find them) are each deliberately about one area rather than a summary of `AGENTS.md`: `changing-limit-behaviour` covers the flag rule, the lock and the fallback; `changing-swept-currencies` covers `currency_pair`, the rate lookup chain and the switches in `scheduled_job`; `working-with-mcp` covers the two harness configs, the read-only PostgreSQL server and the git rules.
+Known gaps: a single rates provider with no failover, no MCP server over this API (optional in the spec), the cache is not warmed. The repository is **private**, so requirement 10 is not formally met — a deliberate choice for code carrying a paid provider integration, noted in `docs/known-gaps.md` so it is a stated decision rather than a silent omission. The skills at `.agents/skills/` (with `.claude/skills` symlinked to `.agents/skills`, so both harnesses find them) are each deliberately about one area rather than a summary of `AGENTS.md`: `changing-limit-behaviour` covers the flag rule, the lock and the fallback; `changing-swept-currencies` covers `currency_pair`, the rate lookup chain and the switches in `scheduled_job`; `working-with-mcp` covers the two harness configs, the read-only PostgreSQL server and the git rules.
 
 **The period without commits cost real work once.** Every file was untracked, so an `rm -rf src/test/java/com/idfinance` — meant for a fixtures package inside that tree — took the twenty-one test sources with it and there was nothing to restore from. They came back by decompiling `target/test-classes`, which recovered the logic and lost the comments, and the surviving `features/*.feature` files were what made the behaviour verifiable afterwards. Before any `rm -rf` inside `src/`, check `find <path> -type f | wc -l` and `git ls-files <path>`; `git status` on an untracked tree tells you nothing useful.
 
