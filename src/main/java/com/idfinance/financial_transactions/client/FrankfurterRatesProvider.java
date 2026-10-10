@@ -57,7 +57,7 @@ import org.springframework.web.client.RestClientResponseException;
 @Component
 @ConditionalOnProperty(name = "app.rates.frankfurter.base-url", matchIfMissing = true)
 @Slf4j
-public class FrankfurterRatesProvider implements RatesProvider {
+public final class FrankfurterRatesProvider implements RatesProvider {
 
 	private final AppProperties properties;
 

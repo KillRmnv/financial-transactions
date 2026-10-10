@@ -51,7 +51,7 @@ import org.springframework.stereotype.Component;
 @Primary
 @RequiredArgsConstructor
 @Slf4j
-public class FallbackRatesProvider implements RatesProvider {
+public final class FallbackRatesProvider implements RatesProvider {
 
 	private final ObjectProvider<TwelveDataRatesProvider> paid;
 
