@@ -28,18 +28,7 @@ import org.springframework.test.context.TestPropertySource;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(value = {TestcontainersConfiguration.class, BddInfrastructureConfiguration.class, TestCurrencyLookup.class,
 		WireMockRatesConfiguration.class})
-// The production quotas, lifted, for the same reason QuotaFeatureContext
-// overrides its
-// own: a bucket that can be exhausted by the suite refusing an unrelated
-// scenario measures
-// the runner, not the code. Eighty-seven scenarios each posting transactions
-// against a
-// 60-per-second limit is a coin toss on a loaded machine — it passed locally
-// and failed on
-// CI with 429 where the feature expected 201, and nothing in this suite is
-// about the quota.
-// The one suite that does verify a quota is QuotaFeatureTest, which sets its
-// own numbers.
+
 @TestPropertySource(properties = {"app.rate-limits.ingestion.limit-for-period=100000",
 		"app.rate-limits.ingestion.limit-refresh-period=1ms", "app.rate-limits.limit-install.limit-for-period=100000",
 		"app.rate-limits.limit-install.limit-refresh-period=1ms"})

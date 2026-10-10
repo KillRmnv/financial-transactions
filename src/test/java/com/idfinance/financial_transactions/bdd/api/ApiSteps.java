@@ -181,8 +181,8 @@ class ApiSteps {
 
 	@Then(value = "the response is {int}")
 	void theResponseIs(int expected) {
-		((AbstractIntegerAssert) Assertions.assertThat(this.response.getStatusCode().value()).as("the HTTP status",
-				new Object[0])).isEqualTo(expected);
+		((AbstractIntegerAssert) Assertions.assertThat(this.response.getStatusCode().value()).as("the HTTP status%s",
+				new Object[]{ApiSteps.bodyOf(this.response)})).isEqualTo(expected);
 	}
 
 	@Then(value = "the response holds {int} exceeded transactions")
@@ -475,6 +475,23 @@ class ApiSteps {
 		softly.assertAll();
 	}
 
+	/**
+	 * What a single accepted transaction is <em>answered with</em>, as opposed to
+	 * what the row keeps.
+	 *
+	 * <p>
+	 * The distinction is the whole reason this exists beside
+	 * {@code theOnlyTransactionIsConvertedAt}: the stored amount keeps the
+	 * precision of the multiplication and this one is rounded for reading. A unit
+	 * that rounds on the way in makes the two agree, which is how the precision
+	 * used to disappear — the scenario that pins it asserts both.
+	 */
+	@Then("the accepted transaction answers with a ledger amount of {string} USD")
+	void theAcceptedTransactionAnswersWithALedgerAmountOf(String expected) {
+		Assertions.assertThat(this.responseBody.get("sumInLedger").decimalValue())
+				.as("the converted amount as the client is shown it").isEqualByComparingTo(new BigDecimal(expected));
+	}
+
 	@Then("the {word} stored transaction is in currency {string}")
 	void theStoredTransactionIsInCurrency(String ordinal, String currency) {
 		JsonNode row = rowAt(ordinal);
@@ -722,6 +739,11 @@ class ApiSteps {
 
 	private static String contentTypeOf(ResponseEntity<String> response) {
 		return response.getHeaders().getContentType() != null ? response.getHeaders().getContentType().toString() : "";
+	}
+
+	/** The body as text, so a failure about a status says which problem it was. */
+	private static String bodyOf(ResponseEntity<String> response) {
+		return response.hasBody() && response.getBody() != null ? ": " + response.getBody() : "";
 	}
 
 	private JsonNode rowAt(String ordinal) {

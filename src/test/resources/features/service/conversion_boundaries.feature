@@ -1,17 +1,18 @@
 Feature: The boundaries of converting into the ledger currency
 
-  A conversion multiplies an amount by a rate and rounds once. Both halves have
+  A conversion multiplies an amount by a rate and stores the product. Both halves have
   boundaries, and both are places where an implementation can be wrong in a way no
   ordinary amount would reveal.
 
-  **Rounding.** `LedgerPolicy.round` is HALF_UP at the configured scale, so the
-  interesting inputs are the half-way ones. HALF_UP and HALF_DOWN differ only on an
-  exact .5, which is precisely the value a "typical" amount never produces and a
-  boundary test always does.
-
-  **Precision.** The rate is not rounded before the multiplication. Rounding first
-  destroys the only precision the conversion has, and the test that catches it needs an
-  amount large enough for the difference to survive to two decimals.
+  **The product is stored exactly.** The column holds eight decimal places, because a
+  currency with a low rate converts an amount into a fraction of a unit: 10 KZT at 0.0022
+  is 0.022, and 1 IDR at 0.000061 is 0.000061. Rounding the product to two decimals turned
+  the first of those into 0.02 and the second into 0.00, and a month whose transactions all
+  round to zero never moves the running total the limit is measured against. The rounding
+  a client sees happens in the mappers, at the display scale, and
+  `features/rule/ledger_policy.feature` is where that decision is pinned. A product that
+  needs a ninth digit is rounded by the column itself — 999.99 × 1.00000001 lands as
+  999.99001000 — which is why the table below quotes stored values to eight places.
 
   **Equivalence classes of a rate.** A rate that is not positive is unusable: it would
   convert an amount into a negative ledger figure, and a zero rate would silently
@@ -27,25 +28,25 @@ Feature: The boundaries of converting into the ledger currency
     Given the account "0000000123" and the category "product"
     And a limit of "1000" USD was installed on "2022-01-01"
 
-  Scenario Outline: Rounding is HALF_UP, so an exact half goes up
+  Scenario Outline: What is stored is the product, not the product rounded
     Given the rate for "KZT" on "2022-01-01" is <rate>
     When a transaction of <sum> KZT was posted on "2022-01-05"
-    Then the transaction of "2022-01-05" totals "<expected>" USD
+    Then the transaction of "2022-01-05" totals "<stored>" USD
 
-    Examples: Half-way and just either side of it
-      | rate   | sum   | expected | why                                         |
-      | 0.5    | "0.05" | 0.03     | 0.025 rounds up, the HALF_UP decision       |
-      | 0.5    | "0.04" | 0.02     | 0.020 lands exactly, no rounding needed     |
-      | 0.5    | "0.03" | 0.02     | 0.015 rounds up                             |
-      | 0.5    | "0.02" | 0.01     | 0.010 lands exactly                          |
-      | 0.5    | "0.01" | 0.01     | 0.005 rounds up                             |
-      | 1.005  | "1"    | 1.01     | the rate itself is half-way                 |
-      | 0.0001 | "0.50" | 0.00     | below half a cent, rounds to nothing        |
+    Examples: Products that used to be rounded away on the way into the row
+      | rate   | sum   | stored   | why                                        |
+      | 0.5    | "0.05" | 0.025    | a half a cent, which is not zero           |
+      | 0.5    | "0.04" | 0.02     | lands exactly                              |
+      | 0.5    | "0.03" | 0.015    | a half a cent in the other direction       |
+      | 0.5    | "0.02" | 0.01     | lands exactly                              |
+      | 0.5    | "0.01" | 0.005    | half of a half a cent                      |
+      | 1.005  | "1"    | 1.005    | the rate itself is half-way                |
+      | 0.0001 | "0.50" | 0.00005  | below half a cent, which is not zero either |
 
   Scenario: The rate is not rounded before the amount is multiplied
     Given the rate for "KZT" on "2022-01-01" is 1.00000001
     When a transaction of "999.99" KZT was posted on "2022-01-05"
-    Then the transaction of "2022-01-05" totals "999.99" USD
+    Then the transaction of "2022-01-05" totals "999.99001000" USD
 
   Scenario Outline: A rate that is not positive cannot convert anything
     Given the rate for "KZT" on "2022-01-01" is <rate>
@@ -96,6 +97,9 @@ Feature: The boundaries of converting into the ledger currency
     When a transaction of "100" KZT was posted on "2022-01-05"
     Then the transaction of "2022-01-05" totals "50.00" USD
 
+  # No rate and no multiplication, so there is nothing to round: the amount arrives as
+  # the client sent it. The 100.01 a client is shown is the display scale rounding it,
+  # which is asserted in the API suite.
   Scenario: The ledger currency needs no rate at all
     When a transaction of "100.005" USD happened on "2022-01-05"
-    Then the transaction of "2022-01-05" totals "100.01" USD
+    Then the transaction of "2022-01-05" totals "100.005" USD

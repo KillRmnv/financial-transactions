@@ -213,9 +213,22 @@ Feature: The client-facing API over HTTP
     And the provider answers "USD" against "KZT" at "450.0000" on "2022-01-01"
     When a transaction in "KZT" for "10000.45" USD happened on "2022-01-05"
     Then the response is 201
-    And the only transaction is converted at "22.22" USD
+    And the only transaction is converted at "22.22322222" USD
     And the provider was asked 1 times for the symbol "KZT/USD"
     And the provider was asked 1 times for the symbol "USD/KZT"
+
+  # The row keeps what the multiplication produced, and the response rounds it. The two
+  # halves are deliberately asserted by different steps: "the transaction is converted
+  # at" reads the stored row, "the stored transaction totals" reads the answer, and a
+  # unit that rounds on the way in would satisfy the second and break the first.
+  Scenario: What the row keeps exactly, the response rounds for reading
+    Given the account "0000000486" and the category "product"
+    And the provider answers "KZT" against "USD" at "0.002222" on "2022-01-01"
+    When a transaction in "KZT" for "10000.45" USD happened on "2022-01-05"
+    Then the response is 201
+    And the only transaction is converted at "22.22099990" USD
+    And the accepted transaction answers with a ledger amount of "22.22" USD
+    And the transaction reports its ledger amount in "USD"
 
   Scenario: A pair the provider does not publish in either direction is stored without a flag
     Given the account "0000000485" and the category "product"
