@@ -63,9 +63,6 @@ services:
       RATES_SOURCE: ${RATES_SOURCE:-twelvedata}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-local}
-    # The JVM sizes itself from this, so it is not optional: with no limit the container sees the host's
-    # memory and MaxRAMPercentage is a share of that. See the README for how the three numbers — heap,
-    # pool, threads — are tied together.
     mem_limit: 1g
     volumes:
       - dumps:/app/dumps
