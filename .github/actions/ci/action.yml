@@ -26,6 +26,10 @@ runs:
 
     # Docker is preinstalled on ubuntu-latest, which is what Testcontainers needs.
     - name: Report the container runtime
+      # `shell` is required on every `run:` step of a composite action. Omitting it does not
+      # fail that step in isolation — the whole action fails to load, and the run ends in a few
+      # seconds with a manifest error rather than with anything resembling a test result.
+      shell: bash
       run: docker version --format '{{.Server.Version}}'
 
     - name: Run the Maven wrapper
