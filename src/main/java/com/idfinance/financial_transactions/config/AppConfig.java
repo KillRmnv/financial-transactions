@@ -40,14 +40,17 @@ public final class AppConfig {
 	}
 
 	/**
-	 * How long one currency may take during the daily sweep before the sweep gives up on it.
+	 * How long one currency may take during the daily sweep before the sweep gives
+	 * up on it.
 	 *
 	 * <p>
-	 * Derived from the provider's own settings rather than guessed at a number: every attempt can spend a
-	 * connect timeout and a read timeout, and there are {@code attempts} of them with a pause between.
-	 * The margin covers the pause and the round trip to the provider that has not started yet, so the
-	 * bound is generous rather than tight — a currency dropped for being slow is recalculated by the
-	 * next sweep, while a sweep that never returns holds a scheduler slot and a lock lease for good.
+	 * Derived from the provider's own settings rather than guessed at a number:
+	 * every attempt can spend a connect timeout and a read timeout, and there are
+	 * {@code attempts} of them with a pause between. The margin covers the pause
+	 * and the round trip to the provider that has not started yet, so the bound is
+	 * generous rather than tight — a currency dropped for being slow is
+	 * recalculated by the next sweep, while a sweep that never returns holds a
+	 * scheduler slot and a lock lease for good.
 	 */
 	@Bean
 	Duration rateSweepTimeout(AppProperties properties) {

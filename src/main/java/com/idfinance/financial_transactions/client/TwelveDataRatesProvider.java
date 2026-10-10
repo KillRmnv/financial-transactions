@@ -85,8 +85,7 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 */
 	private static RetryConfig retryConfig(AppProperties.Rates rates) {
 		return RetryConfig.custom().maxAttempts(Math.max(1, rates.attempts()))
-				.intervalFunction(IntervalFunction.of(rates.retryBackoff()))
-				.retryOnException(failure -> true).build();
+				.intervalFunction(IntervalFunction.of(rates.retryBackoff())).retryOnException(failure -> true).build();
 	}
 
 	/**

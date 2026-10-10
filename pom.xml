@@ -339,6 +339,19 @@
 						</format>
 					</formats>
 				</configuration>
+				<!-- Bound so that verify checks the format. The composite action in ci.yml runs
+				     nothing but `-B verify`, so without this the format is only ever checked
+				     locally, which is how eleven unformatted files reached master. SpotBugs
+				     below is bound for the same reason. -->
+				<executions>
+					<execution>
+						<id>spotless-check</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>com.github.spotbugs</groupId>

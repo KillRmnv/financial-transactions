@@ -142,15 +142,15 @@ public final class ExpenseTransaction {
 	 *
 	 * <p>
 	 * Neither argument may be null here: a flag with no limit behind it, or with no
-	 * outcome, is half of a decision, and the row would report itself as uncalculated
-	 * while carrying the pieces of an answer.
+	 * outcome, is half of a decision, and the row would report itself as
+	 * uncalculated while carrying the pieces of an answer.
 	 *
 	 * <p>
-	 * There is no counterpart that clears the flag. A transaction accepted without a
-	 * usable rate is simply never assigned one, and {@code flag_calculated} comes out
-	 * false because {@code limit_exceeded} was left null — which is the state a fresh
-	 * entity is already in, so a method that put it back would be writing a value that
-	 * was never anything else.
+	 * There is no counterpart that clears the flag. A transaction accepted without
+	 * a usable rate is simply never assigned one, and {@code flag_calculated} comes
+	 * out false because {@code limit_exceeded} was left null — which is the state a
+	 * fresh entity is already in, so a method that put it back would be writing a
+	 * value that was never anything else.
 	 *
 	 * @throws IllegalArgumentException
 	 *             if the limit or the flag is null

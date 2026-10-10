@@ -110,11 +110,13 @@ public class TransactionService {
 			// the flag stays
 			// uncalculated rather than being invented. Such rows are recalculated once the
 			// rate appears.
-			// No flag is assigned and flag_calculated is derived from limit_exceeded, so the
-			// row stores itself as uncalculated: there is no method to call here and none to
+			// No flag is assigned and flag_calculated is derived from limit_exceeded, so
+			// the
+			// row stores itself as uncalculated: there is no method to call here and none
+			// to
 			// forget.
-			log.warn("Stored a transaction of {} {} without a flag: no exchange rate available", transaction.getAmount(),
-					currency.getCode());
+			log.warn("Stored a transaction of {} {} without a flag: no exchange rate available",
+					transaction.getAmount(), currency.getCode());
 			this.expenseTransactionRepository.save(transaction);
 			this.metricsRecorder.transactionAccepted(UNCALCULATED);
 			return accepted;

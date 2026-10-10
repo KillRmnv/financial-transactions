@@ -64,8 +64,8 @@ public interface TransactionMapper {
 
 	default TransactionResponse toResponse(AcceptedTransaction accepted, ZoneId zone) {
 		ExpenseTransaction transaction = accepted.transaction();
-		return new TransactionResponse(transaction.getAccountFrom(), transaction.getAccountTo(), accepted.currencyCode(),
-				transaction.getAmount(), accepted.expenseCategory(), at(transaction, zone),
+		return new TransactionResponse(transaction.getAccountFrom(), transaction.getAccountTo(),
+				accepted.currencyCode(), transaction.getAmount(), accepted.expenseCategory(), at(transaction, zone),
 				transaction.getSumInLedger(), transaction.getLimitExceeded(), transaction.isFlagCalculated());
 	}
 

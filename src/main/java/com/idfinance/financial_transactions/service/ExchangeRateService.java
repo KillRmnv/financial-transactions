@@ -133,8 +133,9 @@ public class ExchangeRateService {
 		String ledger = this.ledgerPolicy.currencyCode();
 		log.debug("No stored rate for {} on {}; asking {}", currency.getCode(), rateDate, this.ratesProvider.name());
 		try {
-			ExchangeRate fetched = this.rateFetchCoordinator.rateFor(currency.getCode(), ledger, rateDate,
-					() -> Optional.ofNullable(this.ratesProvider.rateFor(currency.getCode(), ledger, rateDate)))
+			ExchangeRate fetched = this.rateFetchCoordinator
+					.rateFor(currency.getCode(), ledger, rateDate,
+							() -> Optional.ofNullable(this.ratesProvider.rateFor(currency.getCode(), ledger, rateDate)))
 					.orElse(null);
 			if (fetched == null) {
 				log.warn("The provider has no rate for {}/{} on {}", currency.getCode(), ledger, rateDate);

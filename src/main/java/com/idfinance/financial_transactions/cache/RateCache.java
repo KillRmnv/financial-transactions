@@ -15,12 +15,11 @@ import tools.jackson.databind.ObjectMapper;
  * Rates in Redis, in front of the table that already holds them.
  *
  * <p>
- * A rate is looked up once per transaction, the table answers it
- * with an indexed query, and a cache in front of that saves a round trip. What
- * it must never do is become a second source of truth, so every answer here is
- * treated as a hint — a miss, a decode failure or an unreachable Redis all fall
- * through to the database and the service carries on as if this class were not
- * there.
+ * A rate is looked up once per transaction, the table answers it with an
+ * indexed query, and a cache in front of that saves a round trip. What it must
+ * never do is become a second source of truth, so every answer here is treated
+ * as a hint — a miss, a decode failure or an unreachable Redis all fall through
+ * to the database and the service carries on as if this class were not there.
  *
  * <h2>Why nothing here throws</h2>
  *
