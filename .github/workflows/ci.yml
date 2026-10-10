@@ -28,4 +28,12 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    uses: ./.github/actions/ci
+    # A composite action is invoked from `steps`, never from `jobs.<id>.uses` — that key
+    # is for reusable *workflows*. Pointing it at an action directory produced a run that
+    # failed in zero seconds with no jobs at all, and a failure that quick is not one
+    # anybody is watching for: it survived from the commit that introduced this pipeline.
+    #
+    # The action checks out and sets up the JDK itself, so repeating either here would
+    # run them twice for no gain.
+    steps:
+      - uses: ./.github/actions/ci
