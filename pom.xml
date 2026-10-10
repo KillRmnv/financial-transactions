@@ -28,8 +28,6 @@
 	</scm>
 	<properties>
 		<java.version>25</java.version>
-		<!-- Lombok 1.18.46 (managed by the Boot parent) crashes on JDK 27 with
-		     ExceptionInInitializerError: com.sun.tools.javac.tree.EndPosTable. -->
 		<lombok.version>1.18.48</lombok.version>
 		<!-- Not managed by the Boot parent, so the versions are pinned here. -->
 		<mapstruct.version>1.6.3</mapstruct.version>
@@ -80,8 +78,6 @@
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
-		<!-- Request quotas, driven programmatically from RateLimitInterceptor: the bucket is keyed by
-		     calling address, and an annotation cannot key a limiter by anything but the method. -->
 		<dependency>
 			<groupId>io.github.resilience4j</groupId>
 			<artifactId>resilience4j-ratelimiter</artifactId>
@@ -112,7 +108,6 @@
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>3.1.0</version>
 		</dependency>
-		<!-- Prometheus scrape endpoint for /actuator/prometheus. Version comes from the Boot parent. -->
 		<dependency>
 			<groupId>io.micrometer</groupId>
 			<artifactId>micrometer-registry-prometheus</artifactId>
@@ -196,9 +191,6 @@
 			<version>${wiremock.version}</version>
 			<scope>test</scope>
 		</dependency>
-		<!-- BDD: the feature files under src/test/resources/features are executable
-		     specifications, run by the JUnit Platform engine so that ./mvnw verify
-		     picks them up alongside the JUnit tests. -->
 		<dependency>
 			<groupId>io.cucumber</groupId>
 			<artifactId>cucumber-java</artifactId>
@@ -321,8 +313,6 @@
 						<removeUnusedImports />
 						<trimTrailingWhitespace />
 						<endWithNewline />
-						<!-- The Spring Java Format config ships inside the formatter jar, which is why it
-						     is declared as a plugin dependency above rather than resolved by coordinates. -->
 						<eclipse>
 							<file>io/spring/javaformat/formatter/eclipse/formatter.prefs</file>
 						</eclipse>

@@ -67,9 +67,6 @@ public final class RateFetchCoordinator {
 		String key = key(baseCurrency, quoteCurrency, date);
 		CompletableFuture<Optional<ExchangeRate>> existing = this.inFlight.putIfAbsent(key, new CompletableFuture<>());
 		if (existing != null) {
-			// Someone is already paying for this. Joining rather than waiting on a lock is
-			// what
-			// keeps a second thread off a Tomcat thread and out of the connection pool.
 			log.debug("Joining the in-flight fetch of {}/{} for {}", baseCurrency, quoteCurrency, date);
 			return join(existing, key);
 		}

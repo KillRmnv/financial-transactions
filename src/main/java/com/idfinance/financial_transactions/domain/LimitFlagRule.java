@@ -18,7 +18,7 @@ import java.util.List;
  * The rule is
  *
  * <pre>
- * limit_exceeded = (spent so far this month + this transaction) &gt; (limit in effect)
+ * limit_exceeded = (spent so far this month + this transaction) > (limit in effect)
  * </pre>
  *
  * <p>
@@ -34,11 +34,12 @@ public final class LimitFlagRule {
 
 	/**
 	 * @param spentSoFar
-	 *            this month's total before the transaction being judged, in USD
+	 *            this month's total before the transaction being judged,in ledger
+	 *            currency
 	 * @param amount
-	 *            the transaction amount in USD
+	 *            the transaction amount in ledger currency
 	 * @param limit
-	 *            the limit in effect, in USD
+	 *            the limit in effect,in ledger currency
 	 * @return whether the transaction exceeds it
 	 */
 	public static boolean isExceeded(BigDecimal spentSoFar, BigDecimal amount, BigDecimal limit) {
@@ -63,7 +64,7 @@ public final class LimitFlagRule {
 	 * @param installedOn
 	 *            the installation date, always "now" in this service
 	 * @param amount
-	 *            the limit in USD
+	 *            the limit in ledger currency
 	 */
 	public record LimitOn(LocalDate installedOn, BigDecimal amount) {
 	}

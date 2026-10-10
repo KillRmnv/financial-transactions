@@ -5,81 +5,118 @@ description: Use when changing how the monthly limit flag is decided — the fla
 
 # Changing limit behaviour
 
-The flag is the one thing in this repository that is graded by a table, not by taste. Read the
-table before you write anything: `features/service/limit_flag_scenario.feature` holds all eight
-rows of it, and `Тестовое_задание_Junior_Java_разработчика_2026.md` is the specification it came
-from. A change that makes a scenario fail is not necessarily wrong — but it is never right to
-edit the scenario to make it pass.
+The flag is the only part of this repository specified by a table rather than by taste. Read the
+table before writing anything: `features/service/limit_flag_scenario.feature` contains all eight
+rows. A failing scenario is not automatically wrong, and editing a scenario to make it pass is
+always wrong.
 
-## The rule in one line
+## The rule
 
 ```
-limit_exceeded = (sum of the month's transactions, including this one) > (the limit in effect on
-                 the transaction date)
+limit_exceeded = (sum of the month's transactions, including this one)
+               > (the limit in effect on the transaction date)
 ```
 
-"In effect" means the latest limit with `created_at <= occurred_at`. An exactly-zero remaining
-balance is **not** exceeded: `2000 > 2000` is false.
+"In effect" means the latest limit with `created_at <= occurred_at`. A remaining balance of
+exactly zero is not exceeded: `2000 > 2000` is false.
 
-## Where the money lives
+## Files
 
 | Concern | File |
 |---|---|
 | The rule as a pure function | `domain/LimitFlagRule` |
-| Where a timestamp becomes a month | `domain/MonthBoundary` |
-| The lock, the running total, the flag assignment | `service/TransactionService.applyFlag` |
-| The effective limit, locked | `ExpenseLimitRepository.lockEffectiveOn` |
-| The month total | `ExpenseTransactionRepository.sumInLedgerForMonth` |
-| The limit the flag was computed against | `expense_transaction.limit_id` |
-| The truth table | `features/service/limit_flag_scenario.feature` |
+| Timestamp to month | `domain/MonthBoundary` |
+| Lock, running total, flag assignment | `service/TransactionService.applyFlag` |
+| Effective limit, locked | `ExpenseLimitRepository.lockEffectiveOn` |
+| Month total | `ExpenseTransactionRepository.sumInLedgerForMonth` |
+| Limit the flag was computed against | `expense_transaction.limit_id` |
+| Truth table | `features/service/limit_flag_scenario.feature` |
 
-Change the rule in `domain/LimitFlagRule` and nowhere else. An inline comparison in a service is
-the mistake this file exists to prevent.
+Change the rule in `domain/LimitFlagRule`. An inline comparison in a service is the defect this
+file exists to prevent.
 
-## The three ways a change here goes wrong
+## Three defects that pass review
 
-**1. The limit reaches back before it was installed.** A limit applies from its installation
-datetime forward. Installing a new limit does not change the flag on earlier transactions, and it
-does not reset what the month has already spent — on 10.01 the remaining balance is 900, not 2000.
-Both halves of that sentence are scenarios.
+**1. The limit reaches back before its installation datetime.** A limit applies forward only.
+Installing a new limit does not change flags on earlier transactions and does not reset the month's
+spending: on 10.01 the remaining balance is 900, not 2000.
 
 **2. The running total is read outside the lock.** Two concurrent posts for one account and
-category must not observe the same total. `applyFlag` does three things in this order for a
-reason: ensure the limit exists (so there is something to lock), lock it, read the total. The rate
-is resolved *before* the lock, because an external call under a row lock blocks every other
+category must not observe the same total. `applyFlag` runs three steps in this order — ensure the
+limit exists, lock it, read the total — because the first exists so there is something to lock. The
+rate is resolved before the lock: an external call held under a row lock blocks every other
 transaction of the client.
 
 **3. The fallback is dated at "now".** It is dated at the epoch. A transaction can arrive dated
-before the service ever heard of the account, and "now" would leave it with no limit to compare
-against. `createDefaultIfAbsent` is a native `insert … on conflict do nothing`; never simplify it
-into a read-then-write, or two concurrent first transactions both create a limit.
+before the service knew the account. `createDefaultIfAbsent` is `insert … on conflict do nothing`
+and must not be simplified into a read-then-write, which lets two concurrent first transactions
+both create a limit.
 
-## Before you start
+## Commands
 
-```bash
-export JAVA_HOME=/usr/lib/jvm/java-27-openjdk
-./mvnw test -Dtest=ServiceFeatureTest      # the truth table, in about 30 s
-```
-
-`SettableClock` is how a scenario places an event in time. Set the clock rather than reaching
-into a repository — and note that the early scenarios all move the clock forward, which is how a
-backdated-transaction defect stayed hidden until the scenario that moved it backwards arrived.
-
-## After you change something
+Detect the JDK. Do not hardcode a path: the pom targets 25, CI installs 25, and a machine may have
+any LTS from 21 to 25. Anything outside 21–25 is a wrong answer, not a newer JDK.
 
 ```bash
-./scripts/ci.sh          # format check + all tests + SpotBugs
+java -version 2>&1 | head -1           # what is on PATH
+ls -1 /usr/lib/jvm/                    # what else is installed
 ```
 
-A single scenario: `./mvnw test -Dtest=ServiceFeatureTest -Dcucumber.filter.name="backdated"`.
+`./scripts/ci.sh` pins a usable JDK itself when `JAVA_HOME` has no `javac`, so for anything that
+runs the build it is enough to call it:
 
-## What a passing run does not tell you
+```bash
+./scripts/ci.sh                  # format check + all tests + SpotBugs, ~2 min
+./scripts/ci.sh --fix            # reformat instead of checking
+./scripts/ci.sh -Dtest=Foo       # pass Maven arguments through
+```
 
-- The truth table is checked without a database, in milliseconds. A change to the flag rule that
-  keeps it green has not been checked against the lock or the month boundary yet — run the whole
-  service suite.
-- `sumInLedger` is null when no rate exists, and the flag stays uncalculated rather than being
-  invented as `false`. A scenario that posts only USD will never see this path.
-- `expense_transaction.limit_id` is stored, not resolved by date at query time. A report that
-  starts resolving by date will report the wrong limit for past transactions the moment a new one
-  is installed — `features/api/client_api.feature` asserts the stored behaviour.
+Targeted runs, after exporting a JDK from 21–25 that can compile `--release 25`:
+
+```bash
+./mvnw test -Dtest=ServiceFeatureTest                      # truth table against PostgreSQL, ~30 s
+./mvnw test -Dtest=LimitFlagRuleFeatureTest                # pure functions, no DB, ~0.2 s
+./mvnw test -Dtest=ServiceFeatureTest -Dcucumber.filter.name="backdated"
+./mvnw test -Dtest=ServiceFeatureTest#ScenarioName#methodName
+```
+
+`SettableClock` places an event in time. Set the clock rather than writing rows directly. The
+early scenarios all moved it forward, which is how a backdated-transaction defect stayed hidden.
+
+## What a green run does not prove
+
+- The pure-function suite runs without a database in milliseconds. A change that keeps it green has
+  not been checked against the lock or the month boundary; run the service suite.
+- `sumInLedger` is null when no rate exists and the flag stays uncalculated rather than becoming
+  `false`. A scenario posting only USD never reaches that path.
+- `limit_id` is stored on the row rather than resolved by date at query time. A report that starts
+  resolving by date reports the wrong limit for past transactions as soon as a new limit is
+  installed; `features/api/client_api.feature` asserts the stored behaviour.
+
+## Writing the request that triggers this skill
+
+State the observable change, not the file you think needs editing.
+
+Weak: "fix the limit logic in TransactionService". The agent has to guess which of the three
+defects above applies, and may edit a scenario instead.
+
+Strong: "A limit installed on 2022-01-10 must not change the flag on a transaction from 2022-01-05.
+The scenario for that is missing — add it, run it, and fix the code so it passes."
+
+Checklist for a request in this area:
+
+- Name the observable behaviour in one sentence, with numbers where the specification has them.
+- Say which scenario to add or run. If none exists, say so explicitly — that is a deliverable.
+- Say whether the specification, an existing scenario, or a production incident is the authority.
+- Do not pre-write the fix. Pre-written fixes get applied to the wrong layer.
+
+## Keeping the context small
+
+- Read `domain/LimitFlagRule.java` and the scenario file. Do not read the whole `service` package
+  to find out where the rule lives — the table above answers that in seven lines.
+- One scenario at a time: `-Dcucumber.filter.name=...` before `-Dtest=...`. A full service run is
+  30 seconds and tells you nothing you did not already know.
+- Quote error output, do not re-run to reproduce it. A failed build pasted in full is cheaper than
+  the same build observed twice.
+- Do not paste a feature file to ask where something is tested; `docs/test-cases.md` is the index,
+  and it is already grouped by feature.

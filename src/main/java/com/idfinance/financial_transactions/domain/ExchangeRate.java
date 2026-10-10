@@ -9,10 +9,6 @@ import java.time.LocalDate;
  * A daily exchange rate for one pair, together with the rule that picks between
  * {@code close} and {@code previous_close}.
  *
- * <p>
- * The quote side is never hardcoded here. It is whatever the ledger is kept in,
- * passed in by the caller, because the specification fixes it to USD today and
- * nothing about the arithmetic requires that to stay true.
  *
  * @param baseCurrency
  *            currency of the transaction
@@ -99,14 +95,6 @@ public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate 
 
 	/**
 	 * The same rate read the other way round.
-	 *
-	 * <p>
-	 * Needed because a provider publishes a pair in one orientation only. Twelve
-	 * Data has no {@code KZT/USD} at all — the symbol does not exist and answers
-	 * 404 — while {@code USD/KZT} is there, so a service asked for the tenge rate
-	 * has to ask for the dollar one and divide. The arithmetic belongs here rather
-	 * than in the adapter: a provider that divided on its own would put a financial
-	 * rule in the one class whose job is to speak HTTP.
 	 *
 	 * <p>
 	 * Both sides invert, and {@code previous_close} with them. The fallback is a

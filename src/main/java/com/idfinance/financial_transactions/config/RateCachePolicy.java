@@ -30,8 +30,7 @@ public record RateCachePolicy(boolean enabled, Duration ttl, String keyPrefix) {
 
 	public RateCachePolicy {
 		if (ttl == null || ttl.isNegative() || ttl.isZero()) {
-			throw new IllegalArgumentException(
-					"A cache that expires instantly is not a cache; app.cache.ttl was " + ttl);
+			throw new IllegalArgumentException("App.cache.ttl was " + ttl);
 		}
 		if (keyPrefix == null || keyPrefix.isBlank()) {
 			throw new IllegalArgumentException("app.cache.key-prefix must not be blank: an empty prefix would put this "

@@ -142,10 +142,6 @@ public final class RateCache {
 		try {
 			return Long.parseLong(value);
 		} catch (NumberFormatException ex) {
-			// Something else wrote to this key. Starting at zero would resurrect entries
-			// the
-			// increment was meant to retire, so a new counter is more honest than a parsed
-			// guess.
 			log.warn("The rate cache generation for {} is not a number; starting a new one", pair);
 			return this.redisTemplate.opsForValue().increment(generationKey(pair));
 		}

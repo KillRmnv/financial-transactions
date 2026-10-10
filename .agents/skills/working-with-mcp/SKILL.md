@@ -5,75 +5,122 @@ description: Use when using the GitHub or PostgreSQL MCP servers, when a tool er
 
 # Working with MCP, and with git
 
-## Two harnesses, two config files, neither reads the other's
+## Config files
 
 `.mcp.json` at the repository root is the **Claude Code** format: `mcpServers`, an `env` block,
 `command` as separate keys. OpenCode ignores it — `opencode mcp list` answers *No MCP servers
-configured*. OpenCode wants the key `mcp`, a `"type": "local" | "remote"` on every entry,
-`command` as **one array** combining executable and arguments, and `environment` rather than `env`.
+configured*. OpenCode wants the key `mcp`, `"type": "local" | "remote"` on every entry, `command` as
+**one array** of executable plus arguments, and `environment` rather than `env`.
 
-Both files are kept deliberately: `opencode.json` in the project root carries Context7, being the
-server tied to this repository's dependencies, and `~/.config/opencode/opencode.jsonc` carries
-GitHub and PostgreSQL, being personal and carrying a token.
+Both are kept deliberately. `opencode.json` in the project root carries Context7, which is tied to
+this repository's dependencies; `~/.config/opencode/opencode.jsonc` carries GitHub and PostgreSQL,
+which are personal and carry a token.
 
-## The PostgreSQL server is read-only on purpose
+## PostgreSQL server
 
-`default_transaction_read_only=on` and `statement_timeout=5000`. A writable agent connection to a
-development database is how a table disappears, so the guard belongs in the config rather than in
-the instructions.
+Read-only on purpose: `default_transaction_read_only=on` and `statement_timeout=5000`. A writable
+agent connection to a development database is how a table disappears, so the guard belongs in the
+configuration rather than in the instructions.
 
-The direct consequence, and the one that gets forgotten: **an agent cannot change `currency_pair`
-through this server.** Changing which currencies are swept needs psql or a migration. See
-`changing-swept-currencies`.
+**An agent cannot change `currency_pair` through this server.** Changing which currencies are swept
+requires psql or a migration — see `changing-swept-currencies`.
 
-The `readonly` role has to exist. `docker-compose.yml` seeds only the application role.
+The `readonly` role must exist. `docker-compose.yml` seeds only the application role, so it was
+created by hand.
 
-`@crystaldba/postgres-mcp` no longer exists on npm and the registry answers 404; a command that
+`@crystaldba/postgres-mcp` no longer exists on npm; the registry answers 404, and a command that
 cannot resolve fails as a server that "exited with code 1" rather than as a missing package. The
 replacement is `@contextflo/postgres-mcp`.
 
-## The GitHub server
+## GitHub server
 
 The remote endpoint `https://api.githubcopilot.com/mcp/` answers **403** to a plain `gh` token,
 which works fine against `api.github.com`. The local Docker image
-(`ghcr.io/github/github-mcp-server`) takes the same token and is what is configured.
+`ghcr.io/github/github-mcp-server` takes the same token and is what is configured.
 
 The token comes from `gh auth token` in `config.fish`, so it is never written to a config file or
-to the repository. **The server must see it in the environment at startup**, or it silently falls
-back to a device-code flow that waits for a browser and looks like a hang.
+into the repository. **The server must see it in the environment at startup**, or it falls back to
+a device-code flow that waits for a browser and looks like a hang.
 
-`GITHUB_TOOLSETS` is not optional. The server registers far more tools than a session can carry;
+`GITHUB_TOOLSETS` is not optional: the server registers more tools than a session can carry, and
 `context,repos,issues,pull_requests,actions` is what this project needs.
+
+## Commands
+
+```bash
+gh run list --branch master --limit 5
+gh run list --branch master --limit 1 --json databaseId --jq '.[0].databaseId'   # run id
+gh run view <id> --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
+gh run view <id> --log-failed | head -50
+gh repo view --json isPrivate,visibility
+gh auth token                     # never echo this into a file
+```
+
+A GitHub run that fails in seconds with no jobs is a workflow parse error, not a test failure.
+`gh run view <id> --json jobs` returns an empty array for one and a populated one for the other.
 
 ## Git
 
-**Do not push while another agent is working in this tree.** Two agents committing in the same
-repository means one of them commits the other's half-finished files under the wrong message, which
-has happened here. Stage the paths explicitly — `git add -A` will sweep in whatever appeared since
-the last commit, which is the same failure with extra steps.
+**Do not push while another agent is working in this tree.** Two agents committing in one
+repository means one commits the other's half-finished files under the wrong message, which has
+happened here. Stage paths explicitly — `git add -A` sweeps in whatever appeared since the last
+commit, which is the same failure with extra steps.
+
+Check before staging whether the tree holds work you did not write:
+
+```bash
+git status --short
+git diff --stat
+```
 
 Rewriting history is free before the first push and needs `--force-with-lease` after it.
 
-`gh` is authenticated, but its token may lack a scope a push needs. The common one: **pushing a
-workflow file fails** with `refusing to allow an OAuth App to create or update workflow ... without
-workflow scope`. SSH keys are not subject to that restriction, so switching the remote to
-`git@github.com:` is the escape when `gh auth refresh -s workflow` is not an option.
+`gh` is authenticated, but its token may lack a scope a push needs. Pushing a **workflow file**
+fails with `refusing to allow an OAuth App to create or update workflow ... without workflow
+scope`. SSH keys are not subject to that restriction, so `git@github.com:` is the escape when
+`gh auth refresh -s workflow` is not available.
 
-A public key on disk is not a key GitHub accepts. `ssh-add` after `ssh-agent -c` is the step that
-is easy to skip, and the failure — `Permission denied (publickey)` — reads as if the key were
-rejected.
+A public key on disk is not a key GitHub accepts. `ssh-add` after `ssh-agent -c` is the step that is
+easy to skip, and the failure — `Permission denied (publickey)` — reads as if the key were rejected.
 
 ## When an MCP error names the wrong thing
 
-The error is about the tool's resolution, not about your code. Two seen here:
+The error is about the tool's resolution, not about the code. Two seen here:
 
 - **`Can't find 'action.yml'`** on a local composite action points at the missing
-  `actions/checkout` *in front of it*. A local action is a path on the runner, so the repository
-  has to be on disk before it resolves.
+  `actions/checkout` *in front of it*. A local action is a path on the runner, so the repository has
+  to be on disk before it resolves.
 - **`repository not found`** from the Runner Image Provisioner is an action that does not exist.
   `actions/setup-buildx-action` is not a repository — buildx is published by **Docker**. Check the
   name against the API before assuming the workflow is at fault.
 
 Neither is catchable by running the same Maven command locally. Workflow bugs surface on the first
-real push, which is why the first run has to be watched to its first real step rather than judged
-by its status.
+real push, so the first run has to be watched to its first real step rather than judged by its
+status.
+
+## Writing the request that triggers this skill
+
+Weak: "push the changes". The agent cannot tell whether the tree holds another agent's unfinished
+work, and `git add -A` will commit it.
+
+Strong: "Commit only the four files under `docs/`, leave `src/` untouched, and push to master.
+The tree has another agent's unfinished changes in `src/main/java/.../client/` — do not stage
+them."
+
+Checklist:
+
+- Name the files or the paths, not "the changes".
+- Say what must **not** be staged when other work is in the tree.
+- Say which branch, when it is not the current one.
+- For a CI question, ask for `gh run view --json jobs` before asking for logs: the jobs array
+  distinguishes a parse error from a failing step, and it costs one call.
+
+## Keeping the context small
+
+- Check `gh run list` for the conclusion before pulling logs. `--log-failed` on a green run returns
+  nothing and on a multi-thousand-line run returns everything.
+- Read the JSON view first and request logs only for the failing job: `gh run view <id> --log-failed
+  | grep -i error | head`.
+- For schema questions query through the MCP server rather than reading migration files; for "what
+  does this table mean" read `docs/database.md`, which is shorter than the SQL and says which
+  queries the schema exists to serve.

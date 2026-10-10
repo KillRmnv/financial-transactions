@@ -5,33 +5,27 @@ description: Use when changing which currencies the daily sweep pre-fetches, the
 
 # Changing the swept currencies
 
-Not the flag, but the other thing an operator asks for next, and the answer is not where people
-expect it to be.
+The `currency_pair` table, not `application.yml`, holds the currencies the daily sweep pre-fetches.
+Each sweep iteration is a paid provider request, so the set is an operational decision and lives
+in a table an operator can edit without a release.
 
-## Two branches, and neither is a rejection
-
-The currencies the daily sweep pre-fetches live in the **`currency_pair` table**, not in
-`application.yml`. They are an operational decision — every sweep iteration is a paid provider
-request — and they are in a table so an operator can add or retire one without a release.
-
-**Being absent from this table is not a rejection.** A currency that is not tracked is still
-accepted in a transaction, and its rate is fetched on demand by `ExchangeRateService.fetchAndStore`.
-The table only says what has *already been pre-fetched*.
+**Absence from `currency_pair` is not a rejection.** An untracked currency is still accepted in a
+transaction, and its rate is fetched on demand. The table records what has already been pre-fetched.
 
 | Where the currency sits | Who fetches the rate | When |
 |---|---|---|
 | In `currency_pair`, `active = true` | `ScheduledRatesFetcher.refreshDaily` | once a day, prepaid |
 | Anywhere else | `ExchangeRateService` | on the transaction that needs it |
 
-## Where it lives
+## Files
 
 | Concern | Where |
 |---|---|
-| Which currencies are swept | `currency_pair`, editable via `/api/v1/currency-pairs` |
-| Which currencies are accepted at all | `currency`, seeded by the migration |
+| Which currencies are swept | `currency_pair`, via `/api/v1/currency-pairs` |
+| Which currencies are accepted | `currency`, seeded with three codes, filled by `CurrencyImporter` |
 | Whether each job runs | `scheduled_job` |
-| How a rate is found | `ExchangeRateService` — Redis, then the exact day, then the latest not after it, then the provider |
-| How a rate is written | `ExchangeRateService.store` — this is the path the daily sweep uses too |
+| How a rate is found | `ExchangeRateService`: Redis, exact day, latest not after, provider |
+| How a rate is written | `ExchangeRateService.store`, which the daily sweep also uses |
 
 ## Changing the swept set
 
@@ -42,97 +36,139 @@ GET  /api/v1/currency-pairs          # every tracked currency, active or not
 PUT  /api/v1/currency-pairs/{code}   # body: {"active": true|false}
 ```
 
-`activate` adds the row if the currency was not tracked; `deactivate` on an untracked currency is
-a **404**, not a silent insert — a row created inactive would claim a currency had been tracked and
-would answer a typo with a 200. Setting the value a row already has is a **200**, so a retry
-succeeds. There is no access control anywhere in this prototype, so this endpoint is the first
-thing to remove before the service goes anywhere shared.
+`activate` inserts the row if the currency was not tracked. `deactivate` on an untracked currency
+is a **404**, not a silent insert — an inactive row would claim a currency had been tracked and
+answer a typo with 200. Setting the value a row already has is **200**, so a retry succeeds. There
+is no access control in this prototype; this endpoint is the first thing to remove before the
+service is exposed.
 
 ### Through SQL
 
-For an environment you only have shell access to. Note that the PostgreSQL MCP server is
-`default_transaction_read_only=on`, so an agent using it **cannot** do this — it needs psql, or a
+For an environment with shell access only. The PostgreSQL MCP server runs
+`default_transaction_read_only=on`, so an agent using it cannot run these — use psql or a
 migration.
 
 ```sql
--- start tracking one the seed does not list (the currency must already exist in `currency`)
+-- start tracking one the seed does not list; the currency must already exist in `currency`
 insert into currency_pair (base_currency, active) values ('EUR', true)
 on conflict (base_currency) do update set active = true;
 
 -- retire one, keeping the row and the rates already fetched
 update currency_pair set active = false where base_currency = 'KZT';
 
--- what the sweep is paying for right now
+-- what the sweep is paying for
 select p.base_currency, p.active, p.created_at from currency_pair p order by p.base_currency;
 ```
 
-`base_currency` is a foreign key to `currency(code)`, so a code that is not in the lookup cannot be
-inserted at all — which is why the service returns 404 rather than storing a row it could never
+`base_currency` is a foreign key to `currency(code)`, so a code absent from the lookup cannot be
+inserted at all. That is why the service returns 404 instead of storing a row it could never
 sweep.
 
 ## Switching a scheduled job on or off
 
-Each job asks `ScheduledJobService.isEnabled(...)` at the top of its own method and returns if the
-answer is no. That is a row in `scheduled_job`, not a property:
+Each job calls `ScheduledJobService.isEnabled(...)` at the top of its own method and returns if the
+answer is no. The switch is a row in `scheduled_job`, not a property:
 
 ```sql
--- the weekly currency import: stop paying the provider's credits for it
 update scheduled_job set enabled = false where name = 'weekly-currency-import';
-
--- and back on. No restart either way.
-update scheduled_job set enabled = true where name = 'weekly-currency-import';
+update scheduled_job set enabled = true  where name = 'weekly-currency-import';
 ```
 
-**The cron is not switched off.** `@Scheduled(cron = "0 30 4 * * MON")` stays registered and the
-method still runs every Monday at 04:30 — it returns before reaching the provider. Waking a JVM up
-once a week costs nothing; the HTTP call is what costs credits, and that is what this skips.
+The cron stays registered and the method still runs; it returns before reaching the provider.
+Waking a JVM once a week costs nothing, the HTTP call is what costs credits.
 
 A **missing row means enabled**. Falling back to disabled would let a deleted row silently stop the
 daily sweep the specification requires.
 
-| Row | What it controls | Why it is separate |
+| Row | What it controls | Why separate |
 |---|---|---|
-| `daily-rates` | the daily sweep of the rates | the specification requires it, so it ships enabled |
-| `weekly-currency-import` | re-reading the provider's currency list | costs credits and changes about once a year, so a free plan wants it off |
+| `daily-rates` | the daily sweep of rates | the specification requires it, so it ships enabled |
+| `weekly-currency-import` | re-reading the provider's currency list | costs credits and changes about once a year |
 
-`app.scheduling.enabled` is a different switch and a different question: whether *any* scheduled
-work runs at all. It is a `@ConditionalOnProperty`, which is settled when the context starts, so it
-means a restart — which is why it is right for "no scheduler in a test" and wrong for "stop paying
-for a call".
+`app.scheduling.enabled` is a different question: whether any scheduled work is registered at all.
+It is a `@ConditionalOnProperty`, settled at context startup, so it means a restart. That makes it
+right for "no scheduler in a test" and wrong for "stop paying for a call".
 
-## The ways a change here goes wrong
+## Defects that pass review
 
-**The rate is looked up for the first day of the month**, not for the transaction date, because
-`TransactionService` passes `occurredMonth` to the conversion. A rate stored for the 3rd is
-therefore not found by a transaction on the 5th. Two scenarios in
-`features/service/conversion_boundaries.feature` exist to pin this down.
+**The rate is looked up for the first day of the month**, not the transaction date, because
+`TransactionService` passes `occurredMonth` to the conversion. A rate stored for the 3rd is not
+found by a transaction on the 5th; two scenarios in `features/service/conversion_boundaries.feature`
+pin this down.
 
-**The rate on a transaction is a snapshot, not a reference.** `applied_rate` and `rate_date` are
-stored on the row because `ExchangeRateService.store` *updates* the `currency_rate` row in place. A
-foreign key to `currency_rate` would point at a number that has since changed.
+**`applied_rate` and `rate_date` are a snapshot, not a reference.** They are stored on the
+transaction because `ExchangeRateService.store` updates the `currency_rate` row in place. A foreign
+key would point at a number that has since changed.
 
 **Do not cache a miss.** Caching "no rate for this day" keeps sending transactions down the paid
-external path after the sweep has published one. Invalidation is a generation counter, not key
-deletion, because `findLatestOnOrBefore` deliberately answers a question about the 5th with the
-rate of the 1st, so a write has to retire entries cached under later days too.
+path after the sweep has published one. Invalidation is a generation counter rather than key
+deletion, because `findLatestOnOrBefore` answers a question about the 5th with the rate of the 1st,
+so a write must retire entries cached under later days as well.
 
-**Never add `quote_currency` back to `currency_pair`.** The quote is `LedgerPolicy.currencyCode()`, a
-single value, and a stored copy would be a second source of truth that can disagree with it.
+**Never add `quote_currency` to `currency_pair`.** The quote is `LedgerPolicy.currencyCode()`, a
+single value. A stored copy is a second source of truth that can disagree with the configuration.
 
 **`@ConditionalOnBean` on a `@Component` is fragile.** `WeeklyCurrencyImport` carries one and its
-behaviour depends on the order beans are scanned, unlike `@ConditionalOnProperty`. The bean also
-disappears entirely when no provider URL is configured, because with `NoRatesProvider` there is
-nothing to list.
+behaviour depends on bean scan order, unlike `@ConditionalOnProperty`. The bean also disappears
+entirely when no provider URL is configured, because with `NoRatesProvider` there is nothing to
+list.
 
-## Before you start
+**The provider does not do what its documentation says.** `KZT/USD` does not exist and answers
+404; `USD/KZT` does. There is no `/currency` endpoint on any tier. `previous_close` is never sent —
+the answer carries exactly `datetime, open, high, low, close`, so `fetchOnce` builds the fallback
+itself from a ten-day window, choosing the point by comparing dates rather than by position. The
+history is about a year on the free tier. Details and measurements: `docs/currencies.md` and
+`docs/assumptions.md`.
+
+## Commands
+
+Detect the JDK. Do not hardcode a path: the pom targets 25, CI installs 25, and any LTS from 21 to
+25 is acceptable. A version outside 21–25 is a wrong answer, not a newer JDK.
 
 ```bash
-export JAVA_HOME=/usr/lib/jvm/java-27-openjdk
-./mvnw test -Dtest=ServiceFeatureTest   # conversion_boundaries, currency_sweep
-./mvnw test -Dtest=ApiFeatureTest       # currency_contract, currency_pairs
+java -version 2>&1 | head -1
+ls -1 /usr/lib/jvm/
 ```
 
-`features/service/currency_sweep.feature` is the one that writes to the `currency` table, so it
-restores the lookup afterwards and sets the `scheduled_job` rows back on in its `@After`. If you add
-a scenario that switches a job off, restore it there too — the flag is shared by every suite, and a
-row left off makes a later scenario's sweep silently do nothing.
+`./scripts/ci.sh` pins a usable JDK itself when `JAVA_HOME` has no `javac`.
+
+```bash
+./scripts/ci.sh --fix                          # reformat instead of checking
+./mvnw test -Dtest=ServiceFeatureTest          # conversion_boundaries, currency_sweep
+./mvnw test -Dtest=ApiFeatureTest              # currency_contract, currency_pairs, rates_fallback
+./mvnw test -Dtest=ServiceFeatureTest -Dcucumber.filter.name="currency"
+```
+
+`features/service/currency_sweep.feature` is the feature that writes to the `currency` table. It
+restores the lookup and the `scheduled_job` rows in its `@After`. A scenario that switches a job off
+must restore it there too: the flag is shared by every suite, and a row left off makes a later
+scenario's sweep silently do nothing.
+
+## Writing the request that triggers this skill
+
+State the operational outcome and the authority.
+
+Weak: "add EUR to the sweep". The agent may edit `application.yml`, which the table above
+explicitly rules out, and may not add the row at all.
+
+Strong: "Stop pre-fetching KZT; the deployment pays per poll. Keep the row and the rates already
+fetched — `active = false`, not a delete."
+
+Checklist:
+
+- Say whether the change is about what is swept, what is accepted, or how a rate is found. They are
+  three different tables.
+- Say whether a code must exist in `currency` first, if the change involves a new currency.
+- Say whether the change is paid for on every run. That decides whether it belongs in
+  `currency_pair`, `currency`, or `scheduled_job`.
+- Ask for the scenario, not just the code.
+
+## Keeping the context small
+
+- Read `ExchangeRateService.java` and the one feature. Do not read the whole `client` package: the
+  provider contract is in `docs/currencies.md`.
+- Filter by scenario name before by suite. `currency_sweep` and `currency_pairs` are in different
+  suites and each takes under a minute.
+- For a database question use the MCP PostgreSQL server rather than starting the application. It is
+  read-only, so a request to change a row has to become a migration or a psql command — say which
+  one you want rather than letting it be discovered.

@@ -14,8 +14,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 /**
- * Limits are keyed by the client's own account, which the specification defines
- * as a ten digit string.
+ * Limits are keyed by the client's own account, which is a ten digit string.
  */
 public interface ExpenseLimitRepository extends JpaRepository<ExpenseLimit, Long> {
 

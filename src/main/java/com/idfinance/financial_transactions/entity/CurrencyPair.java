@@ -60,15 +60,6 @@ public final class CurrencyPair {
 	@Column(name = "active", nullable = false)
 	private boolean active;
 
-	/**
-	 * JPA's protected no-args constructor is for the framework; this one is how a
-	 * row is created.
-	 *
-	 * <p>
-	 * {@code created_at} is not a parameter because the column is
-	 * database-defaulted and marked {@code updatable = false}: the database stamps
-	 * it on insert, and a value passed in here would be ignored without any error.
-	 */
 	public CurrencyPair(Currency baseCurrency, boolean active) {
 		this.baseCurrency = baseCurrency;
 		this.active = active;

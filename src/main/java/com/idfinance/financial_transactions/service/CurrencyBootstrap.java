@@ -54,9 +54,6 @@ public final class CurrencyBootstrap {
 			try {
 				this.currencyImporter.importPublished();
 			} catch (RuntimeException ex) {
-				// The importer already handles the provider failing. Anything reaching here is
-				// a defect, and it must not take the process down: the service is up and
-				// serving the codes it was seeded with.
 				log.warn("The startup currency import failed: {}", ex.getMessage());
 			}
 		});

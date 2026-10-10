@@ -22,12 +22,6 @@ public interface CurrencyRateRepository extends JpaRepository<CurrencyRate, Long
 
 	/**
 	 * The rate of one exact day, which is what the lookup chain tries first.
-	 *
-	 * <p>
-	 * Written as an explicit query rather than derived from the parameter names:
-	 * the properties are {@code baseCurrency} and {@code rateDate}, and a derived
-	 * query would look for properties called {@code currency} and {@code date},
-	 * which do not exist.
 	 */
 	@Query("""
 			select r from CurrencyRate r

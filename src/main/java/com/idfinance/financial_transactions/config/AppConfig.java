@@ -60,7 +60,7 @@ public final class AppConfig {
 	RateTimeouts.Rates rateTimeoutSettings(AppProperties properties) {
 		AppProperties.Rates rates = properties.rates();
 		return new RateTimeouts.Rates(rates.connectTimeout(), rates.readTimeout(), rates.attempts(),
-				rates.retryBackoff());
+				rates.retryBackoff(), rates.fallbackDays());
 	}
 
 }

@@ -41,8 +41,11 @@ public record RateTimeouts(RateTimeouts.Rates rates) {
 	 *            total attempts, at least one
 	 * @param retryBackoff
 	 *            pause between attempts
+	 * @param fallbackDays
+	 *            how far to look in the past
 	 */
-	public record Rates(Duration connectTimeout, Duration readTimeout, int attempts, Duration retryBackoff) {
+	public record Rates(Duration connectTimeout, Duration readTimeout, int attempts, Duration retryBackoff,
+			int fallbackDays) {
 	}
 
 	/**

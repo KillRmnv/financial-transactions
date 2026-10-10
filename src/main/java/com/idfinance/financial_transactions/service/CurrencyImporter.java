@@ -13,10 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>
  * Two callers, one implementation: {@code CurrencyBootstrap} at startup and
- * {@code WeeklyCurrencyImport} on a schedule. They used to be the same loop
- * written once, which is how it stayed in the {@code client} package — where it
- * did not belong, since the {@code client} package is HTTP adapters and this is
- * business logic that happens to call one.
+ * {@code WeeklyCurrencyImport} on a schedule.
  *
  * <p>
  * <strong>It never removes anything.</strong> A code that has been seen once
@@ -25,11 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
  * belongs to {@code currency_pair}, which says what is swept, not to the
  * lookup, which says what is accepted.
  *
- * <p>
- * <strong>A provider failure costs nothing but the import.</strong> The lookup
- * keeps whatever it had and a transaction whose currency is missing from it is
- * refused rather than invented, which is the same refusal it got before the
- * call was made.
  */
 @Service
 @RequiredArgsConstructor
@@ -58,8 +50,6 @@ public class CurrencyImporter {
 		try {
 			published = this.ratesProvider.publishedCurrencies();
 		} catch (RuntimeException ex) {
-			// A provider that is down must not stop the service from starting, and must not
-			// empty a lookup that already has entries in it. The weekly sweep is the retry.
 			log.warn("Could not list the currencies published by {}: {}", this.ratesProvider.name(), ex.getMessage());
 			return 0;
 		}
