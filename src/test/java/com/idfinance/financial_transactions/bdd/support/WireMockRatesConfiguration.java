@@ -76,8 +76,8 @@ public class WireMockRatesConfiguration {
 
 		HttpRatesStub(WireMockServer server) {
 			this.server = server;
-			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/currency")).willReturn(WireMock.okJson("""
-					{"data":[{"code":"KZT","name":"Kazakhstani Tenge"},{"code":"RUB","name":"Russian Ruble"}]}""")));
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/symbol_search")).willReturn(WireMock.okJson("""
+					{"data":[{"symbol":"USD/EUR"},{"symbol":"USD/GBP"}]}""")));
 		}
 
 		/**
@@ -89,6 +89,23 @@ public class WireMockRatesConfiguration {
 					{"values":[{"close":%s,"previous_close":null}]}""".formatted(close.toPlainString());
 			this.published.add(new ServedRate(baseCurrency, quoteCurrency, date, body));
 			answer(baseCurrency, quoteCurrency, date, body, Duration.ZERO);
+		}
+
+		/**
+		 * Makes one symbol answer 404, the way the provider does for a pair it does not
+		 * publish.
+		 *
+		 * <p>
+		 * Twelve Data has no {@code KZT/USD} at all while {@code USD/KZT} is there, and
+		 * it says so with a 404 whose message reads like a malformed request.
+		 * Reproducing that exactly is the point: a stub that only ever answers
+		 * successes never learns that the inverse fallback exists, and it was the live
+		 * provider that found it — the suite had been green throughout.
+		 */
+		public void withoutSymbol(String baseCurrency, String quoteCurrency) {
+			String symbol = baseCurrency + "/" + quoteCurrency;
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/time_series"))
+					.withQueryParam("symbol", WireMock.equalTo(symbol)).willReturn(WireMock.notFound()));
 		}
 
 		/**
@@ -158,8 +175,8 @@ public class WireMockRatesConfiguration {
 		public void reset() {
 			this.server.resetAll();
 			this.published.clear();
-			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/currency")).willReturn(WireMock.okJson("""
-					{"data":[{"code":"KZT","name":"Kazakhstani Tenge"},{"code":"RUB","name":"Russian Ruble"}]}""")));
+			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/symbol_search")).willReturn(WireMock.okJson("""
+					{"data":[{"symbol":"USD/EUR"},{"symbol":"USD/GBP"}]}""")));
 		}
 
 	}

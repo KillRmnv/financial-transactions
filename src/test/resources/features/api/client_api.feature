@@ -170,3 +170,24 @@ Feature: The client-facing API over HTTP
     Then the response is 404
     And the response is a problem of type "not-found"
     And 0 transactions are stored
+
+  # Twelve Data has no KZT/USD — the symbol does not exist and answers 404 — while USD/KZT is there.
+  # Found against the live provider; every stub until then answered only with successes, so the
+  # adapter's inverse fallback had nothing in the suite to be exercised by.
+  Scenario: A pair the provider publishes the other way round is converted by division
+    Given the account "0000000484" and the category "product"
+    And the provider does not publish "KZT" against "USD"
+    And the provider answers "USD" against "KZT" at "450.0000" on "2022-01-01"
+    When a transaction in "KZT" for "10000.45" USD happened on "2022-01-05"
+    Then the response is 201
+    And the only transaction is converted at "22.22" USD
+    And the provider was asked 1 times for the symbol "KZT/USD"
+    And the provider was asked 1 times for the symbol "USD/KZT"
+
+  Scenario: A pair the provider does not publish in either direction is stored without a flag
+    Given the account "0000000485" and the category "product"
+    And the provider does not publish "KZT" against "USD"
+    And the provider does not publish "USD" against "KZT"
+    When a transaction in "KZT" for "10000.45" USD happened on "2022-01-05"
+    Then the response is 201
+    And the only transaction is stored without a flag

@@ -417,6 +417,11 @@ class ApiSteps {
 				.isEqualTo(currency);
 	}
 
+	@Given("the provider does not publish {string} against {string}")
+	void theProviderDoesNotPublish(String baseCurrency, String quoteCurrency) {
+		this.ratesStub.withoutSymbol(baseCurrency, quoteCurrency);
+	}
+
 	@Then("the provider was asked {int} times for the symbol {string}")
 	void theProviderWasAskedTimesFor(int times, String symbol) {
 		long count = this.ratesStub.requestedSymbols().stream().filter((requested) -> requested.equals(symbol)).count();

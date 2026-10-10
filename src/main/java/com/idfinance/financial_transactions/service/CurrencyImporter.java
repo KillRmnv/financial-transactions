@@ -70,7 +70,7 @@ public class CurrencyImporter {
 			if (code == null) {
 				continue;
 			}
-			if (this.currencyRepository.insertIfAbsent(code, entry.displayName()) > 0) {
+			if (this.currencyRepository.insertIfAbsent(code, displayNameOf(code, entry)) > 0) {
 				added++;
 				log.info("Added the currency {} from {}", code, this.ratesProvider.name());
 			}
@@ -78,6 +78,27 @@ public class CurrencyImporter {
 		log.info("Currency import finished, {} new codes of {} published by {}", added, published.size(),
 				this.ratesProvider.name());
 		return added;
+	}
+
+	/**
+	 * The label to store, which is not always one the provider gave.
+	 *
+	 * <p>
+	 * {@code currency.display_name} is {@code not null}, and a provider is under no
+	 * obligation to name what it quotes: Twelve Data answers a currency pair with a
+	 * symbol and nothing else, so an import that stored its answer as given would
+	 * fail on the constraint for every row it tried to add. The code is used
+	 * instead — a column called "the name" holding {@code EUR} is uninformative,
+	 * but it is visible and an operator can correct it, whereas a failed insert is
+	 * neither.
+	 *
+	 * <p>
+	 * Blank rather than null, because a provider answering {@code ""} or
+	 * {@code " "} is making the same omission more quietly.
+	 */
+	private static String displayNameOf(String code, RatesProvider.PublishedCurrency entry) {
+		String name = entry.displayName();
+		return (name == null || name.isBlank()) ? code : name.trim();
 	}
 
 	/**

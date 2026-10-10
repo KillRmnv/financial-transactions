@@ -2,6 +2,7 @@ package com.idfinance.financial_transactions.domain;
 
 import com.idfinance.financial_transactions.entity.CurrencyRate;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 
 /**
@@ -26,6 +27,15 @@ import java.time.LocalDate;
  */
 public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate rateDate, BigDecimal close,
 		BigDecimal previousClose) {
+
+	/**
+	 * Digits kept when a rate is inverted. Wider than the eight the column stores,
+	 * so the division rounds once at the end rather than inheriting the scale of a
+	 * rate it has not seen yet, and narrower than {@code BigDecimal} allows itself
+	 * to carry, which would make a comparison between two rates of different
+	 * provenance a question of scale rather than of value.
+	 */
+	private static final int INVERSE_SCALE = 12;
 
 	public ExchangeRate {
 		if (close == null && previousClose == null) {
@@ -71,6 +81,38 @@ public record ExchangeRate(String baseCurrency, String quoteCurrency, LocalDate 
 	 */
 	public static ExchangeRate identity(String ledgerCurrencyCode, LocalDate date) {
 		return new ExchangeRate(ledgerCurrencyCode, ledgerCurrencyCode, date, BigDecimal.ONE, null);
+	}
+
+	/**
+	 * The same rate read the other way round.
+	 *
+	 * <p>
+	 * Needed because a provider publishes a pair in one orientation only. Twelve
+	 * Data has no {@code KZT/USD} at all — the symbol does not exist and answers
+	 * 404 — while {@code USD/KZT} is there, so a service asked for the tenge rate
+	 * has to ask for the dollar one and divide. The arithmetic belongs here rather
+	 * than in the adapter: a provider that divided on its own would put a financial
+	 * rule in the one class whose job is to speak HTTP.
+	 *
+	 * <p>
+	 * Both sides invert, and {@code previous_close} with them. The fallback is a
+	 * rate of the same pair on another day, so leaving it upright would mix an
+	 * upright close with an inverted fallback and produce a number belonging to
+	 * neither orientation.
+	 *
+	 * @return the rate with the sides swapped; a null side stays null, so an absent
+	 *         close does not become a zero and then trip the check that rejects a
+	 *         rate with nothing usable in it
+	 */
+	public ExchangeRate inverted() {
+		return new ExchangeRate(this.quoteCurrency, this.baseCurrency, this.rateDate, invert(this.close),
+				invert(this.previousClose));
+	}
+
+	private static BigDecimal invert(BigDecimal rate) {
+		return (rate == null || rate.signum() == 0)
+				? null
+				: BigDecimal.ONE.divide(rate, INVERSE_SCALE, RoundingMode.HALF_UP);
 	}
 
 	public String pairKey() {
