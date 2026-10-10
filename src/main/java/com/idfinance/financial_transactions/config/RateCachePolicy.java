@@ -9,9 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>
  * Redis here is a cache and nothing else: the database remains the source of
  * truth for every rate, and a Redis that is down, slow or unreachable must cost
- * a round trip and nothing else. The specification asks for the rates to be
- * cached "over the main database", which is exactly the relationship — the
- * cache sits in front of a table that answers on its own.
+ * a round trip and nothing else.
  *
  * @param enabled
  *            whether to consult Redis at all; turning it off leaves every code

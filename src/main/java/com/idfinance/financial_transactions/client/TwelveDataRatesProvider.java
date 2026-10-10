@@ -21,12 +21,6 @@ import org.springframework.web.client.RestClient;
  * Wire adapter for <a href="https://twelvedata.com">Twelve Data</a>, and for no
  * other provider.
  *
- * <p>
- * The name says so deliberately. The class used to be called
- * {@code HttpRatesClient}, which described the transport and nothing else, so a
- * reader had to open it to learn which provider it spoke to. It is bound to two
- * endpoints whose shape is Twelve Data's own and is not a generic currency API:
- *
  * <ul>
  * <li>{@code GET /time_series?symbol=BASE/QUOTE&interval=1day&date=YYYY-MM-DD}
  * — answers
@@ -49,11 +43,6 @@ import org.springframework.web.client.RestClient;
  * {@code previous_close}, which is why the work is not a URL change.
  *
  * <p>
- * A second provider is a second implementation of {@link RatesProvider},
- * registered as its own bean. Nothing here is shared with it beyond the
- * contract, and the service layer does not know this class exists.
- *
- * <p>
  * Retries and timeouts come from configuration, because the ingestion path must
  * not hang when the provider is slow. The retry is resilience4j's {@link Retry}
  * core API rather than its {@code @Retry} aspect: an aspect needs the Spring
@@ -63,14 +52,6 @@ import org.springframework.web.client.RestClient;
  * <p>
  * The client builds its own {@link RestClient} rather than injecting a builder:
  * Boot 4 does not contribute a {@code RestClient.Builder} bean.
- *
- * <p>
- * Stubs live with the tests: {@code features/api/client_api.feature} drives
- * this class against a WireMock server pointed at it through
- * {@code app.rates.base-url}, so the request it builds — path, query
- * parameters, and the JSON it parses — is exercised rather than assumed. The
- * service scenarios replace the whole adapter with an in-process bean and
- * therefore say nothing about it.
  */
 @Component
 @ConditionalOnProperty(name = "app.rates.base-url")
@@ -105,12 +86,6 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	private static RetryConfig retryConfig(AppProperties.Rates rates) {
 		return RetryConfig.custom().maxAttempts(Math.max(1, rates.attempts()))
 				.intervalFunction(IntervalFunction.of(rates.retryBackoff()))
-				// A pause blocks the servlet thread. The specification calls the provider slow,
-				// so the pause
-				// between attempts is the one place a short wait is worth it; the alternative
-				// would be to
-				// fail fast and store the transaction unflagged, which loses the rate
-				// permanently.
 				.retryOnException(failure -> true).build();
 	}
 

@@ -15,38 +15,18 @@ import tools.jackson.databind.ObjectMapper;
  * Rates in Redis, in front of the table that already holds them.
  *
  * <p>
- * The specification asks for this as an optional point, and its value is narrow
- * and honest: a rate is looked up once per transaction, the table answers it
+ * A rate is looked up once per transaction, the table answers it
  * with an indexed query, and a cache in front of that saves a round trip. What
  * it must never do is become a second source of truth, so every answer here is
  * treated as a hint — a miss, a decode failure or an unreachable Redis all fall
  * through to the database and the service carries on as if this class were not
  * there.
  *
- * <h2>Why a generation counter rather than deleting keys</h2>
- *
- * <p>
- * A cached answer is keyed by the day that was <em>asked for</em>, while the
- * rate that answered it may be older — {@code findLatestOnOrBefore}
- * deliberately answers a query about 5 January with the rate of 3 January. So
- * storing a new rate for 3 January has to invalidate the entry cached under 5
- * January, and by the same argument every later day too. Finding those keys
- * needs a scan, or a set of keys per pair to track.
- *
- * <p>
- * Instead each pair has a generation number, the generation is part of every
- * key, and storing a rate increments it. The old entries become unreachable in
- * one command, with no scan and no bookkeeping; they are left to expire under
- * the TTL, which is what the TTL is really for. The cost is one extra
- * {@code GET} per lookup, which is the price of not scanning.
- *
  * <h2>Why nothing here throws</h2>
  *
  * <p>
  * Ingestion is the product. A transaction must be stored whether or not the
- * cache answered, so every Redis failure is caught, counted and logged at a
- * level that does not wake anybody at three in the morning. A cache that can
- * fail an upload is not a cache.
+ * cache answered, so every Redis failure is caught, counted and logged.
  */
 @Component
 @RequiredArgsConstructor
@@ -85,15 +65,9 @@ public final class RateCache {
 			}
 			return Optional.of(this.objectMapper.readValue(cached, ExchangeRate.class));
 		} catch (RedisConnectionFailureException ex) {
-			// Redis is unreachable. Worth knowing and not worth failing over: the database
-			// is
-			// right there and answers the same question.
 			log.warn("The rate cache is unreachable, falling back to the database: {}", ex.getMessage());
 			return Optional.empty();
 		} catch (RuntimeException ex) {
-			// A payload from an older version of this class, or a value that is not a rate
-			// at all.
-			// Dropping one entry is strictly better than letting it poison every lookup.
 			log.warn("Discarding an unreadable rate cache entry for {} on {}: {}", pair, rateDate, ex.getMessage());
 			evict(pair, rateDate);
 			return Optional.empty();

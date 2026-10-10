@@ -285,14 +285,14 @@ class ServiceLevelSteps {
 		Assertions.assertThat(transaction.getLimitId()).as("the transaction stores the limit it was measured against")
 				.isNotNull();
 
-		Assertions.assertThat(this.expenseLimitRepository.findById(transaction.getLimitId()).orElseThrow().getSum())
+		Assertions.assertThat(this.expenseLimitRepository.findById(transaction.getLimitId()).orElseThrow().getAmount())
 				.as("the limit the flag of %s was computed against", isoDate)
 				.isEqualByComparingTo(new BigDecimal(expected));
 	}
 
 	@Then("the automatic default limit is {string} USD")
 	void theAutomaticDefaultLimitIs(String expected) {
-		Assertions.assertThat(defaultLimit().getSum()).as("the standing fallback")
+		Assertions.assertThat(defaultLimit().getAmount()).as("the standing fallback")
 				.isEqualByComparingTo(new BigDecimal(expected));
 	}
 

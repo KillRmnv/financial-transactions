@@ -24,12 +24,24 @@ import org.springframework.transaction.annotation.Transactional;
  * question, not something to guess at.
  *
  * <p>
+ * <strong>The sweep can be switched off on its own</strong>, with
+ * {@code app.currencies.weekly-import.enabled}, and separately from
+ * {@code app.scheduling.enabled}. The two answer different questions: the
+ * scheduling flag is about not running scheduled work during a test, while this
+ * one is about not spending a provider's credits on a list that changes once a
+ * year. A deployment on a free plan pays for the daily rate sweep, which the
+ * specification requires, and can decline to pay for the currency listing,
+ * which it does not. The default is on, so a deployment that does nothing keeps
+ * today's behaviour.
+ *
+ * <p>
  * Only active when a provider is configured; with {@link NoRatesProvider} in
  * place there is nothing to sweep, and the seeded list stands on its own.
  */
 @Component
 @ConditionalOnBean(RatesProvider.class)
 @ConditionalOnProperty(name = "app.scheduling.enabled", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.currencies.weekly-import.enabled", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class WeeklyCurrencyImport {

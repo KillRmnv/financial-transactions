@@ -60,7 +60,46 @@ public final class CurrencyPair {
 	@Column(name = "active", nullable = false)
 	private boolean active;
 
+	/**
+	 * JPA's protected no-args constructor is for the framework; this one is how a
+	 * row is created.
+	 *
+	 * <p>
+	 * {@code created_at} is not a parameter because the column is
+	 * database-defaulted and marked {@code updatable = false}: the database stamps
+	 * it on insert, and a value passed in here would be ignored without any error.
+	 */
+	public CurrencyPair(Currency baseCurrency, boolean active) {
+		this.baseCurrency = baseCurrency;
+		this.active = active;
+	}
+
 	@Column(name = "created_at", nullable = false, insertable = false, updatable = false)
 	private Instant createdAt;
+
+	/**
+	 * Starts sweeping this currency again.
+	 *
+	 * <p>
+	 * Methods rather than a setter, for the same reason the rest of this entity has
+	 * none: {@code active} is a decision with a cost attached — every sweep
+	 * iteration is a paid request — so its two directions are named separately and
+	 * neither is reachable by accident.
+	 */
+	public void activate() {
+		this.active = true;
+	}
+
+	/**
+	 * Retires this currency from the daily sweep.
+	 *
+	 * <p>
+	 * Deactivating is not deleting: the stored rates stay as history, and an
+	 * inactive row still records that the currency was tracked. A transaction in a
+	 * deactivated currency is not refused — its rate is fetched on demand instead.
+	 */
+	public void deactivate() {
+		this.active = false;
+	}
 
 }

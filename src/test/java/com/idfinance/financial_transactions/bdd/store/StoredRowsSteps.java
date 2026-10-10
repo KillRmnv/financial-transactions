@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import org.assertj.core.api.Assertions;
+import org.assertj.core.api.SoftAssertions;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
@@ -43,6 +44,22 @@ class StoredRowsSteps {
 	@Then("the transaction of {string} is not flagged")
 	void theTransactionIsNotFlagged(String isoDate) {
 		Assertions.assertThat(flagOf(isoDate)).as("the flag of %s", isoDate).isFalse();
+	}
+
+	/**
+	 * The unflagged state is three things at once, and all three are asserted
+	 * together because a service that stored the row and left the flag null has not
+	 * invented an answer, while one that stored a {@code false} has.
+	 */
+	@Then("the transaction of {string} is stored without a flag")
+	void theTransactionIsStoredWithoutAFlag(String isoDate) {
+		ExpenseTransaction transaction = transactionOf(isoDate);
+
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(transaction.getLimitExceeded()).as("no flag rather than a false one").isNull();
+		softly.assertThat(transaction.isFlagCalculated()).as("and the row says so explicitly").isFalse();
+		softly.assertThat(transaction.getSumInLedger()).as("the converted amount is unknown").isNull();
+		softly.assertAll();
 	}
 
 	private ExpenseTransaction transactionOf(String isoDate) {

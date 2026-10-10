@@ -1,17 +1,3 @@
-# Optional convenience stack: Postgres + Redis + the service.
-#
-#   docker compose up -d db redis
-#   SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/financial \
-#   SPRING_DATASOURCE_USERNAME=financial SPRING_DATASOURCE_PASSWORD=financial \
-#   SPRING_DATA_REDIS_HOST=localhost ./mvnw spring-boot:run
-#
-# Or bring up everything, service included:
-#
-#   docker compose up --build -d
-#
-# Credentials and the provider key come from the environment (see .env.example), so nothing secret is
-# committed. The test suite does NOT use this file: Testcontainers provides both containers.
-
 services:
 
   db:
@@ -80,6 +66,10 @@ services:
       RATES_API_BASE_URL: ${RATES_API_BASE_URL:-}
       RATES_API_KEY: ${RATES_API_KEY:-}
       RATES_SOURCE: ${RATES_SOURCE:-twelvedata}
+      # The weekly sweep of the currency lookup costs a provider call a week and changes nothing
+      # most weeks. Set it to false in .env to keep a free plan for the daily rate sweep; the
+      # price is that an ISO code introduced after the seed waits for a migration.
+      APP_CURRENCIES_WEEKLY_IMPORT_ENABLED: ${APP_CURRENCIES_WEEKLY_IMPORT_ENABLED:-true}
       # Without this the container runs on the defaults, which is not what production runs on: the
       # pool would be ten, virtual threads on, and the health endpoint would describe its details.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}

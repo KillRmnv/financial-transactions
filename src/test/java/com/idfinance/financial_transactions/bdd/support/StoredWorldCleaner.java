@@ -1,9 +1,12 @@
 package com.idfinance.financial_transactions.bdd.support;
 
 import com.idfinance.financial_transactions.config.RateCachePolicy;
+import com.idfinance.financial_transactions.entity.CurrencyPair;
+import com.idfinance.financial_transactions.repository.CurrencyPairRepository;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
+import java.util.List;
 import java.util.Set;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -38,14 +41,23 @@ public class StoredWorldCleaner {
 
 	private final RateCachePolicy rateCachePolicy;
 
+	private final CurrencyPairRepository currencyPairRepository;
+
+	/**
+	 * The tracked set as the migration left it, captured on the first clean.
+	 */
+	private List<CurrencyPair> seededPairs;
+
 	public StoredWorldCleaner(ExpenseTransactionRepository expenseTransactionRepository,
 			ExpenseLimitRepository expenseLimitRepository, CurrencyRateRepository currencyRateRepository,
-			StringRedisTemplate redisTemplate, RateCachePolicy rateCachePolicy) {
+			StringRedisTemplate redisTemplate, RateCachePolicy rateCachePolicy,
+			CurrencyPairRepository currencyPairRepository) {
 		this.expenseTransactionRepository = expenseTransactionRepository;
 		this.expenseLimitRepository = expenseLimitRepository;
 		this.currencyRateRepository = currencyRateRepository;
 		this.redisTemplate = redisTemplate;
 		this.rateCachePolicy = rateCachePolicy;
+		this.currencyPairRepository = currencyPairRepository;
 	}
 
 	/**
@@ -66,7 +78,38 @@ public class StoredWorldCleaner {
 		this.expenseTransactionRepository.deleteAll();
 		this.expenseLimitRepository.deleteAll();
 		this.currencyRateRepository.deleteAll();
+		cleanCurrencyPairs();
 		cleanCache();
+	}
+
+	/**
+	 * Puts the tracked-currency set back the way the migration seeded it.
+	 *
+	 * <p>
+	 * Not a delete: the sweep reads this table, so emptying it would change what
+	 * the daily fetch does, and the seed is the state the rest of the suite
+	 * assumes. The rows are captured on the first call, when the table is still
+	 * whatever the migration made it, and restored from that — which is also why
+	 * this does not repeat KZT and RUB in code and drift away from the migration
+	 * the first time somebody adds a third pair to it.
+	 *
+	 * <p>
+	 * The flush between the delete and the insert is not optional: both statements
+	 * are queued until the transaction commits, and an insert ordered ahead of the
+	 * delete of its own {@code base_currency} would trip the unique index.
+	 */
+	private void cleanCurrencyPairs() {
+		List<CurrencyPair> current = this.currencyPairRepository.findAll();
+
+		if (this.seededPairs == null) {
+			this.seededPairs = current;
+			return;
+		}
+
+		this.currencyPairRepository.deleteAll();
+		this.currencyPairRepository.flush();
+		this.currencyPairRepository.saveAll(this.seededPairs.stream()
+				.map(pair -> new CurrencyPair(pair.getBaseCurrency(), pair.isActive())).toList());
 	}
 
 	/**
