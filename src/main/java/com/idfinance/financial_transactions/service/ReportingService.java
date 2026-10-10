@@ -104,12 +104,11 @@ public class ReportingService {
 	 * database, and telling a client that would be worse than telling it nothing.
 	 */
 	private LimitRow toRow(LimitReportRow row) {
-		OffsetDateTime installedAt = row.getLimitDatetime().equals(Instant.EPOCH)
-				? null
-				: row.getLimitDatetime().atZone(this.zone).toOffsetDateTime();
+		boolean isFallback = row.getLimitDatetime().equals(Instant.EPOCH);
+		OffsetDateTime installedAt = isFallback ? null : row.getLimitDatetime().atZone(this.zone).toOffsetDateTime();
 		BigDecimal spent = row.getSpent();
 		return new LimitRow(row.getId(), row.getExpenseCategory(), row.getLimitSum(), installedAt, spent,
-				row.getLimitSum().subtract(spent), row.getCurrencyShortname());
+				row.getLimitSum().subtract(spent), row.getCurrencyShortname(), isFallback);
 	}
 
 	private ExceededRow toRow(ExpenseTransaction transaction, String expenseCategory, ExpenseLimit limit) {
@@ -158,9 +157,12 @@ public class ReportingService {
 	 *            negative once the month goes over the limit, which is legitimate
 	 * @param limitDatetime
 	 *            null when the limit is the automatic fallback
+	 * @param limitDefault
+	 *            true for that fallback, so a client can tell it apart from a limit
+	 *            whose installation date is merely unknown
 	 */
 	public record LimitRow(Long id, String expenseCategory, BigDecimal limitSum, OffsetDateTime limitDatetime,
-			BigDecimal spentUsd, BigDecimal remainingUsd, String limitCurrencyShortname) {
+			BigDecimal spentLedger, BigDecimal remaining, String limitCurrencyShortname, boolean limitDefault) {
 	}
 
 	/**

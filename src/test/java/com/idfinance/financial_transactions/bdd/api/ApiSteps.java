@@ -331,13 +331,62 @@ class ApiSteps {
 		// the assertion that would notice the aggregation being dropped or the join
 		// losing the category.
 		SoftAssertions softly = new SoftAssertions();
-		softly.assertThat(row.get("spentUsd").decimalValue()).as("the month's total against the limit")
+		softly.assertThat(row.get("spentLedger").decimalValue()).as("the month's total against the limit")
 				.isEqualByComparingTo(new BigDecimal(spent));
-		softly.assertThat(row.get("remaining").decimalValue()).as("limitSum minus spentUsd")
+		softly.assertThat(row.get("remaining").decimalValue()).as("limitSum minus spentLedger")
 				.isEqualByComparingTo(new BigDecimal(remaining));
+		// The code is asserted twice on purpose: once for the limit's own currency, and
+		// once
+		// for the ledger column, because those are two separate fields that happen to
+		// carry the
+		// same value today. A ledger moved to another currency would have to move both.
 		softly.assertThat(row.get("limitCurrencyShortname").asText()).as("the ledger currency of the limit")
 				.isEqualTo("USD");
+		softly.assertThat(row.get("ledgerCurrency").asText()).as("the currency spentLedger is in").isEqualTo("USD");
 		softly.assertAll();
+	}
+
+	@Then("the limit for {string} is the automatic fallback")
+	void theLimitIsTheFallback(String category) {
+		Assertions.assertThat(limitRowOf(category).get("limitDefault").asBoolean())
+				.as("%s marked as the automatic fallback", category).isTrue();
+	}
+
+	@Then("the limit for {string} is not the automatic fallback")
+	void theLimitIsNotTheFallback(String category) {
+		Assertions.assertThat(limitRowOf(category).get("limitDefault").asBoolean())
+				.as("%s marked as an installed limit", category).isFalse();
+	}
+
+	@Then("the limit for {string} was installed on {string}")
+	void theLimitWasInstalledOn(String category, String isoDate) {
+		Assertions.assertThat(limitRowOf(category).get("limitDatetime").asText())
+				.as("the installation date of the %s limit", category).startsWith(isoDate);
+	}
+
+	@Then("the limit for {string} has no installation date")
+	void theLimitHasNoInstallationDate(String category) {
+		// Null rather than a date: the automatic fallback is dated at the epoch in the
+		// database
+		// and has no installation event, and 1 January 1970 would be a worse answer
+		// than none.
+		Assertions.assertThat(limitRowOf(category).get("limitDatetime").isNull())
+				.as("the installation date of the %s limit", category).isTrue();
+	}
+
+	@Then("the transaction reports its ledger amount in {string}")
+	void theTransactionReportsItsLedgerAmountIn(String expected) {
+		Assertions.assertThat(this.responseBody.get("ledgerCurrency").asText())
+				.as("the currency sumInLedger is expressed in").isEqualTo(expected);
+	}
+
+	private JsonNode limitRowOf(String category) {
+		for (JsonNode row : this.responseBody) {
+			if (category.equals(row.get("expenseCategory").asText())) {
+				return row;
+			}
+		}
+		throw new AssertionError("No limit for the category " + category + " in " + this.responseBody);
 	}
 
 	@Given(value = "the provider answers {string} against {string} at {string} on {string}")
@@ -348,6 +397,22 @@ class ApiSteps {
 	@Given(value = "the provider has no close for {string} against {string} on {string} and offers {string} instead")
 	void theProviderOffersPreviousClose(String base, String quote, String isoDate, String previousClose) {
 		this.ratesStub.previousCloseOn(base, quote, LocalDate.parse(isoDate), new BigDecimal(previousClose));
+	}
+
+	/**
+	 * A day the provider has no close for at all — the whole day, not a close field
+	 * inside an answer.
+	 *
+	 * <p>
+	 * Distinct from the step above on purpose. That one describes an API that
+	 * answers a day with a null close and a previous one beside it, which is what
+	 * this provider does <em>not</em> do, so keeping it means the shape we actually
+	 * get is the one with a scenario against it.
+	 */
+	@Given("the provider has no close for {string} against {string} on {string}")
+	void theProviderHasNoCloseAtAll(String base, String quote, String isoDate) {
+		LocalDate date = LocalDate.parse(isoDate);
+		this.ratesStub.withoutCloseOn(base, quote, date);
 	}
 
 	@Given("the provider is unreachable")
@@ -415,6 +480,23 @@ class ApiSteps {
 		JsonNode row = rowAt(ordinal);
 		Assertions.assertThat(row.get("currencyShortname").asText()).as("the currency of the %s transaction", ordinal)
 				.isEqualTo(currency);
+	}
+
+	/**
+	 * The days the provider answers a window request with, read from a table.
+	 *
+	 * <p>
+	 * A table rather than three separate steps because the adapter picks the latest
+	 * day of the window by comparing dates, and a scenario that stated them as
+	 * three fixed calls could not say which of them was meant to be the one that
+	 * answered.
+	 */
+	@Given("the provider answers a window for {string} against {string} with:")
+	void theProviderAnswersAWindowWith(String baseCurrency, String quoteCurrency, DataTable table) {
+		Map<LocalDate, BigDecimal> days = new java.util.LinkedHashMap<>();
+		table.asMaps(String.class, String.class)
+				.forEach((row) -> days.put(LocalDate.parse(row.get("date")), new BigDecimal(row.get("close"))));
+		this.ratesStub.window(baseCurrency, quoteCurrency, days);
 	}
 
 	@Given("the provider does not publish {string} against {string}")

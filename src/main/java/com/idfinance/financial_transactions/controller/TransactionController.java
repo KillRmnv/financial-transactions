@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.controller;
 
+import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.MonthBoundary;
 import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.dto.TransactionResponse;
@@ -45,6 +46,13 @@ public final class TransactionController {
 
 	private final MonthBoundary monthBoundary;
 
+	/**
+	 * To say which currency {@code sumInLedger} is in. Read from configuration
+	 * rather than guessed from the request, because a transaction's own currency is
+	 * not the one its converted amount is expressed in.
+	 */
+	private final LedgerPolicy ledgerPolicy;
+
 	@Operation(summary = "Accept a batch of expense operations", description = """
 			Stores several transactions in one call. Their exchange rates are resolved concurrently,
 			because a currency the service has never seen costs an external call measured in seconds, and
@@ -68,7 +76,7 @@ public final class TransactionController {
 			@Valid @RequestBody @NotEmpty @Size(max = 100) List<@Valid TransactionRequest> requests) {
 		var accepted = this.transactionService.acceptBatch(requests);
 		return ResponseEntity.status(HttpStatus.CREATED).body(accepted.stream()
-				.map(row -> this.transactionMapper.toResponse(row, this.monthBoundary.zone())).toList());
+				.map(row -> this.transactionMapper.toResponse(row, this.monthBoundary.zone(), ledgerCode())).toList());
 	}
 
 	@Operation(summary = "Accept an expense operation", description = """
@@ -87,7 +95,11 @@ public final class TransactionController {
 	ResponseEntity<TransactionResponse> accept(@Valid @RequestBody TransactionRequest request) {
 		var accepted = transactionService.accept(request);
 		return ResponseEntity.status(HttpStatus.CREATED)
-				.body(transactionMapper.toResponse(accepted, this.monthBoundary.zone()));
+				.body(transactionMapper.toResponse(accepted, this.monthBoundary.zone(), ledgerCode()));
+	}
+
+	private String ledgerCode() {
+		return this.ledgerPolicy.currencyCode();
 	}
 
 }

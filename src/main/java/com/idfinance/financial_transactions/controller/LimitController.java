@@ -113,7 +113,8 @@ public final class LimitController {
 
 	private LimitResponse toResponse(String accountFrom, ReportingService.LimitRow row) {
 		return new LimitResponse(accountFrom, row.expenseCategory(), row.limitSum(), row.limitCurrencyShortname(),
-				row.limitDatetime(), row.spentUsd(), row.remainingUsd());
+				row.limitDatetime(), row.limitDefault(), row.limitCurrencyShortname(), row.spentLedger(),
+				row.remaining());
 	}
 
 }

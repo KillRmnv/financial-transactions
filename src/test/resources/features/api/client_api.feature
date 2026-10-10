@@ -73,6 +73,31 @@ Feature: The client-facing API over HTTP
     And the response holds 1 limits
     And the limit for "product" reports "1100" spent and "900" remaining
 
+  # An installed limit has a date; the standing 1000 USD fallback has none, because nothing
+  # installed it. A null date on its own reads as "unknown", so the row says which of the two
+  # it is.
+  Scenario: An installed limit reports its installation date and is not the fallback
+    Given the account "0000000123" and the category "product"
+    And a limit of "1000" USD was installed on "2022-01-10"
+    When the limits of the account are requested
+    Then the limit for "product" is not the automatic fallback
+    And the limit for "product" was installed on "2022-01-10"
+
+  Scenario: The automatic fallback reports no date and says so
+    Given the account "0000000123" and the category "product"
+    And a transaction of "10" USD happened on "2022-01-10"
+    When the limits of the account are requested
+    Then the limit for "product" is the automatic fallback
+    And the limit for "product" has no installation date
+
+  Scenario: A converted transaction says which currency its sumInLedger is in
+    Given the account "0000000456" and the category "product"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And a limit of "2000" USD was installed on "2022-01-01"
+    When a transaction in "KZT" for "400" USD happened on "2022-01-05"
+    Then the response is 201
+    And the transaction reports its ledger amount in "USD"
+
   Scenario: A rate published by the provider converts the transaction over the wire
     Given the account "0000000456" and the category "product"
     And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
@@ -82,9 +107,17 @@ Feature: The client-facing API over HTTP
     And the provider was asked for the symbol "KZT/USD"
     And the only transaction is converted at "1.00" USD
 
-  Scenario: A day with no close of its own falls back to the provider's previous close
+  # Twelve Data sends no previous_close at all — its answers carry datetime, open, high, low, close
+  # and nothing else — so the fallback the specification names is built by the adapter out of a window.
+  # The stub used to answer with previous_close because someone put it there, and the field was read,
+  # read correctly, and never once populated by anything real.
+  Scenario: A day with no close of its own is priced from the last close before it
     Given the account "0000000457" and the category "product"
-    And the provider has no close for "KZT" against "USD" on "2022-01-01" and offers "0.0025" instead
+    And the provider has no close for "KZT" against "USD" on "2022-01-01"
+    And the provider answers a window for "KZT" against "USD" with:
+      | date       | close  |
+      | 2021-12-29 | 0.0024 |
+      | 2021-12-30 | 0.0025 |
     And a limit of "2000" USD was installed on "2022-01-01"
     When a transaction in "KZT" for "400" USD happened on "2022-01-05"
     Then the response is 201

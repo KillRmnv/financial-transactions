@@ -62,11 +62,12 @@ public interface TransactionMapper {
 	ExpenseTransaction toEntity(TransactionRequest request, Currency currency, Long categoryId, Instant occurredAt,
 			LocalDate occurredMonth);
 
-	default TransactionResponse toResponse(AcceptedTransaction accepted, ZoneId zone) {
+	default TransactionResponse toResponse(AcceptedTransaction accepted, ZoneId zone, String ledgerCurrency) {
 		ExpenseTransaction transaction = accepted.transaction();
 		return new TransactionResponse(transaction.getAccountFrom(), transaction.getAccountTo(),
 				accepted.currencyCode(), transaction.getAmount(), accepted.expenseCategory(), at(transaction, zone),
-				transaction.getSumInLedger(), transaction.getLimitExceeded(), transaction.isFlagCalculated());
+				transaction.getSumInLedger(), transaction.getLimitExceeded(), ledgerCurrency,
+				transaction.isFlagCalculated());
 	}
 
 	/**

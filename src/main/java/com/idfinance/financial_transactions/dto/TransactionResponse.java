@@ -30,6 +30,13 @@ public record TransactionResponse(
 
 		@Schema(description = "Whether the month's running total went over the limit in effect. Null means no answer could be computed, which is not the same as false", example = "false") Boolean limitExceeded,
 
+		/**
+		 * Which currency {@code sumInLedger} is in. The ledger currency is
+		 * configuration, so a number without it cannot be interpreted by a client that
+		 * did not read {@code app.ledger.currency-code}.
+		 */
+		@Schema(description = "ISO 4217 code that sumInLedger is expressed in, which is the ledger currency", example = "USD") String ledgerCurrency,
+
 		@Schema(description = "False exactly when the flag could not be computed, usually because no rate was available", example = "true") Boolean limitCalculated) {
 
 }
