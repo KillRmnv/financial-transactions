@@ -52,6 +52,21 @@ public final class AppConfig {
 	 * recalculated by the next sweep, while a sweep that never returns holds a
 	 * scheduler slot and a lock lease for good.
 	 */
+	/**
+	 * How long the rate phase of a batch of transactions may take.
+	 *
+	 * <p>
+	 * Larger than the provider's own timeouts, because a batch runs its calls
+	 * concurrently and the wait is for the slowest of them rather than for the sum
+	 * — but only just, since it exists to bound a provider that never answers.
+	 */
+	@Bean
+	Duration rateBatchTimeout(AppProperties properties) {
+		AppProperties.Rates rates = properties.rates();
+		Duration perAttempt = rates.connectTimeout().plus(rates.readTimeout());
+		return perAttempt.multipliedBy(Math.max(1, rates.attempts())).plusSeconds(10);
+	}
+
 	@Bean
 	Duration rateSweepTimeout(AppProperties properties) {
 		AppProperties.Rates rates = properties.rates();

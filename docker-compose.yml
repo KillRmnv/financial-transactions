@@ -58,20 +58,9 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-financial}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-financial}
       SPRING_DATA_REDIS_HOST: redis
-      # The provider's URL and key. Without the URL the TwelveDataRatesProvider is not registered at all
-      # and NoRatesProvider takes its place, so the application starts and silently never fetches a rate.
-      # Listing them here is what makes the value in .env reach the container: compose substitutes into
-      # the variables named in `environment` only, so a key defined in .env and not listed here is
-      # simply not passed.
       RATES_API_BASE_URL: ${RATES_API_BASE_URL:-}
       RATES_API_KEY: ${RATES_API_KEY:-}
       RATES_SOURCE: ${RATES_SOURCE:-twelvedata}
-      # The weekly sweep of the currency lookup costs a provider call a week and changes nothing
-      # most weeks. Set it to false in .env to keep a free plan for the daily rate sweep; the
-      # price is that an ISO code introduced after the seed waits for a migration.
-      APP_CURRENCIES_WEEKLY_IMPORT_ENABLED: ${APP_CURRENCIES_WEEKLY_IMPORT_ENABLED:-true}
-      # Without this the container runs on the defaults, which is not what production runs on: the
-      # pool would be ten, virtual threads on, and the health endpoint would describe its details.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-local}
     # The JVM sizes itself from this, so it is not optional: with no limit the container sees the host's
@@ -79,8 +68,6 @@ services:
     # pool, threads — are tied together.
     mem_limit: 1g
     volumes:
-      # A heap dump that lives in the container's writable layer disappears when the container does,
-      # which is the one moment its contents would have been read.
       - dumps:/app/dumps
     depends_on:
       db:

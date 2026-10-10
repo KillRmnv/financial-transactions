@@ -9,9 +9,26 @@
     },
     "postgres": {
       "command": "npx",
-      "args": ["-y", "@crystaldba/postgres-mcp", "postgresql://readonly:readonly@localhost:5432/financial"],
+      "args": ["-y", "@contextflo/postgres-mcp", "postgresql://readonly:readonly@localhost:5432/financial"],
       "env": {
         "PGOPTIONS": "-c statement_timeout=5000 -c default_transaction_read_only=on"
+      }
+    },
+    "github": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "-e",
+        "GITHUB_TOOLSETS",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "GITHUB_TOOLSETS": "context,repos,issues,pull_requests,actions"
       }
     }
   }

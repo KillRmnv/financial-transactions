@@ -366,6 +366,64 @@ class ApiSteps {
 		this.ratesStub.failing();
 	}
 
+	/**
+	 * Posts a batch, where the rows carry an amount and a currency so the step can
+	 * mix them.
+	 *
+	 * <p>
+	 * The body is built by hand rather than through a data table for the same
+	 * reason the concurrent step is: the point is the request shape, and a table
+	 * would put a cucumber feature in charge of JSON.
+	 */
+	@When("a batch is posted with these transactions:")
+	void aBatchIsPosted(DataTable table) {
+		List<Map<String, Object>> body = table.asMaps(String.class, String.class).stream().map((row) -> {
+			Map<String, Object> transaction = new LinkedHashMap<>();
+			transaction.put("accountFrom", this.accountFrom);
+			transaction.put("accountTo", COUNTERPART);
+			transaction.put("currencyShortname", row.get("currency"));
+			transaction.put("sum", new BigDecimal(row.get("sum")));
+			transaction.put("expenseCategory", this.category);
+			transaction.put("datetime",
+					LocalDate.parse(row.get("date")).atStartOfDay().atOffset(ZoneOffset.UTC).toString());
+			return transaction;
+		}).toList();
+
+		this.response = exchange(
+				((RestClient.RequestBodySpec) this.client().post().uri("/api/v1/transactions/batch", new Object[0]))
+						.body(body));
+		this.responseBody = readBody();
+	}
+
+	@Then("the response holds {int} stored transactions")
+	void theResponseHoldsStoredTransactions(int expected) {
+		Assertions.assertThat(this.responseBody.isArray()).as("the batch response is a JSON array").isTrue();
+		Assertions.assertThat(this.responseBody.size()).as("how many transactions came back").isEqualTo(expected);
+	}
+
+	@Then("the {word} stored transaction totals {string} USD")
+	void theStoredTransactionTotals(String ordinal, String expected) {
+		JsonNode row = rowAt(ordinal);
+		SoftAssertions softly = new SoftAssertions();
+		softly.assertThat(row.get("sumInLedger").decimalValue()).as("the converted amount")
+				.isEqualByComparingTo(new BigDecimal(expected));
+		softly.assertThat(row.get("limitExceeded").asBoolean()).as("the flag was computed").isNotNull();
+		softly.assertAll();
+	}
+
+	@Then("the {word} stored transaction is in currency {string}")
+	void theStoredTransactionIsInCurrency(String ordinal, String currency) {
+		JsonNode row = rowAt(ordinal);
+		Assertions.assertThat(row.get("currencyShortname").asText()).as("the currency of the %s transaction", ordinal)
+				.isEqualTo(currency);
+	}
+
+	@Then("the provider was asked {int} times for the symbol {string}")
+	void theProviderWasAskedTimesFor(String times, String symbol) {
+		long count = this.ratesStub.requestedSymbols().stream().filter((requested) -> requested.equals(symbol)).count();
+		Assertions.assertThat(count).as("how many external calls for %s", symbol).isEqualTo(Long.parseLong(times));
+	}
+
 	@Then(value = "the provider was asked for the symbol {string}")
 	void theProviderWasAskedFor(String symbol) {
 		Assertions.assertThat(this.ratesStub.requestedSymbols()).as("the symbols the adapter requested")

@@ -4,9 +4,11 @@ import com.idfinance.financial_transactions.bdd.support.StoredWorldCleaner;
 import com.idfinance.financial_transactions.bdd.support.StubRatesProvider;
 import com.idfinance.financial_transactions.client.WeeklyCurrencyImport;
 import com.idfinance.financial_transactions.entity.Currency;
+import com.idfinance.financial_transactions.entity.ScheduledJob;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
 import com.idfinance.financial_transactions.service.RatesProvider;
+import com.idfinance.financial_transactions.service.ScheduledJobService;
 import io.cucumber.datatable.DataTable;
 import io.cucumber.java.After;
 import io.cucumber.java.Before;
@@ -60,6 +62,9 @@ class CurrencySweepSteps {
 	@Autowired
 	private StubRatesProvider stubRatesProvider;
 
+	@Autowired
+	private ScheduledJobService scheduledJobService;
+
 	/**
 	 * The codes present before this scenario ran, so the sweep's effect is a diff.
 	 */
@@ -75,6 +80,7 @@ class CurrencySweepSteps {
 		this.codesBeforeSweep = codesInLookup();
 		this.stubRatesProvider.setPublishedCurrencies();
 		this.stubRatesProvider.setCurrencyListingFails(false);
+		this.stubRatesProvider.resetCurrencyListingCalls();
 	}
 
 	/**
@@ -96,12 +102,48 @@ class CurrencySweepSteps {
 	 */
 	@After
 	void restoreTheLookup() {
+		// The flag first: it is shared state that this file mutates and nothing else
+		// restores. Left
+		// off, every later scenario in every suite would have a sweep that silently
+		// does nothing,
+		// and the failure would land in whichever one happened to run next.
+		this.scheduledJobService.setEnabled(ScheduledJob.Names.WEEKLY_CURRENCY_IMPORT, true);
+		this.scheduledJobService.setEnabled(ScheduledJob.Names.DAILY_RATES, true);
+
 		this.expenseTransactionRepository.deleteAll();
 		for (Currency added : this.currencyRepository.findAll()) {
 			if (!this.codesBeforeSweep.contains(added.getCode())) {
 				this.currencyRepository.delete(added);
 			}
 		}
+	}
+
+	@Given("the weekly currency import is switched off")
+	void theWeeklyCurrencyImportIsSwitchedOff() {
+		this.scheduledJobService.setEnabled(ScheduledJob.Names.WEEKLY_CURRENCY_IMPORT, false);
+	}
+
+	@Given("the weekly currency import is switched on")
+	void theWeeklyCurrencyImportIsSwitchedOn() {
+		this.scheduledJobService.setEnabled(ScheduledJob.Names.WEEKLY_CURRENCY_IMPORT, true);
+	}
+
+	/**
+	 * The provider was not asked at all, rather than the lookup not having grown.
+	 * The list this scenario publishes is non-empty, so a job that ignored the flag
+	 * would both add a currency and make the call — but only the call is the thing
+	 * being paid for.
+	 */
+	@Then("the provider was not asked for its currency list")
+	void theProviderWasNotAskedForItsCurrencyList() {
+		Assertions.assertThat(this.stubRatesProvider.currencyListingCalls())
+				.as("calls to the provider's currency listing, which is what the switch exists to avoid").isZero();
+	}
+
+	@Then("the provider was asked for its currency list")
+	void theProviderWasAskedForItsCurrencyList() {
+		Assertions.assertThat(this.stubRatesProvider.currencyListingCalls())
+				.as("calls to the provider's currency listing").isGreaterThan(0);
 	}
 
 	@Given("the provider publishes these currencies:")

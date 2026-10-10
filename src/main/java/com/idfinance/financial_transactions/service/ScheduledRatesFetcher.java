@@ -5,6 +5,7 @@ import com.idfinance.financial_transactions.config.SchedulerLockConfig;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.CurrencyPair;
+import com.idfinance.financial_transactions.entity.ScheduledJob;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyPairRepository;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
@@ -93,6 +94,8 @@ public class ScheduledRatesFetcher {
 
 	private final RateFetchCoordinator rateFetchCoordinator;
 
+	private final ScheduledJobService scheduledJobService;
+
 	/**
 	 * How long one currency may take before the sweep gives up on it. Derived from
 	 * the provider's own timeouts rather than guessed: three attempts with a pause
@@ -103,6 +106,17 @@ public class ScheduledRatesFetcher {
 	@Scheduled(cron = "0 0 ${app.scheduled-fetch-hour} * * *", zone = "${app.month-timezone}")
 	@SchedulerLock(name = SchedulerLockConfig.Names.DAILY_RATES, lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
 	public void refreshDaily() {
+		// Read here rather than as a bean condition, so that switching this off is an
+		// UPDATE and
+		// not a restart, and so every replica agrees. The specification requires the
+		// sweep, which
+		// is why the row ships enabled and why a missing row counts as enabled.
+		if (!this.scheduledJobService.isEnabled(ScheduledJob.Names.DAILY_RATES)) {
+			log.debug("Skipping the daily rate sweep: {} is switched off in scheduled_job",
+					ScheduledJob.Names.DAILY_RATES);
+			return;
+		}
+
 		// The first of the month, not today. TransactionService asks for a rate for
 		// occurredMonth,
 		// which is the first day of the month the transaction belongs to, so a rate

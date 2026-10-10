@@ -7,6 +7,7 @@ import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.ExpenseCategory;
 import com.idfinance.financial_transactions.entity.ExpenseLimit;
 import com.idfinance.financial_transactions.entity.ExpenseTransaction;
+import com.idfinance.financial_transactions.exception.BatchResolutionFailedException;
 import com.idfinance.financial_transactions.exception.LockUnavailableException;
 import com.idfinance.financial_transactions.exception.NotFoundException;
 import com.idfinance.financial_transactions.mapper.TransactionMapper;
@@ -17,14 +18,22 @@ import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Accepts transactions and decides whether each one exceeded its limit.
@@ -80,6 +89,19 @@ public class TransactionService {
 
 	private final Clock clock;
 
+	private final TransactionTemplate transactionTemplate;
+
+	/**
+	 * How long the rate phase of a batch may take before the batch is abandoned.
+	 *
+	 * <p>
+	 * Generous on purpose: a batch of twenty transactions in twenty currencies
+	 * costs twenty external calls, and the point of the phase is that they overlap.
+	 * Bounding it is not about speed but about a provider that never answers, which
+	 * would otherwise hold the request thread indefinitely.
+	 */
+	private final Duration batchTimeout;
+
 	/**
 	 * Accepts one transaction.
 	 *
@@ -89,20 +111,150 @@ public class TransactionService {
 	 */
 	@Transactional
 	public AcceptedTransaction accept(TransactionRequest request) {
-		ExpenseCategory category = category(request.expenseCategory());
-		Currency currency = currency(request.currencyShortname());
+		return store(prepare(request, currency(request.currencyShortname()), category(request.expenseCategory())));
+	}
 
+	/**
+	 * Accepts several transactions at once, resolving their rates in parallel.
+	 *
+	 * <p>
+	 * The two phases are split on purpose, and which of them runs concurrently is
+	 * the whole design.
+	 *
+	 * <p>
+	 * <b>Preparing</b> resolves the category, the currency and the exchange rate.
+	 * The rate is the slow part: a currency the service has never seen costs an
+	 * external call measured in seconds, and a client posting a day's transactions
+	 * across several currencies pays for those calls one after another otherwise.
+	 * They are independent of each other, so they run at once.
+	 *
+	 * <p>
+	 * <b>Storing</b> runs sequentially, each transaction in its own transaction. It
+	 * cannot usefully be parallel: two of them for one account and category contend
+	 * for the same limit row, and the {@code PESSIMISTIC_WRITE} lock that keeps the
+	 * running total correct would serialise them anyway — thread scheduling to
+	 * arrive at the queue the lock already imposes.
+	 *
+	 * <p>
+	 * A transaction whose rate is unavailable is stored without a flag, exactly as
+	 * on the single-request path, and it does not stop the others: one currency the
+	 * provider cannot answer is no reason to refuse the rest of a batch. A failure
+	 * that is not about rates — an unknown currency, a constraint — aborts the
+	 * batch, because by then earlier transactions are already stored and reporting
+	 * a uniform failure for a partially written batch would be a lie.
+	 *
+	 * @param requests
+	 *            the batch, validated as a whole by the caller
+	 * @return one result per request, in the order they were sent
+	 */
+	public List<AcceptedTransaction> acceptBatch(List<TransactionRequest> requests) {
+		if (requests.isEmpty()) {
+			return List.of();
+		}
+		return resolveRates(requests).stream().map(this::storeInItsOwnTransaction).toList();
+	}
+
+	/**
+	 * The rate phase: one virtual thread per transaction.
+	 *
+	 * <p>
+	 * A virtual thread per task rather than a fixed pool because the batch size is
+	 * the caller's decision and a pool would have to guess it — the same reason the
+	 * daily sweep works this way.
+	 *
+	 * <p>
+	 * Each task opens its own transaction through {@link TransactionTemplate}.
+	 * These are new threads, so there is no transaction to inherit and no ambient
+	 * one to propagate; without the template each preparation would read outside a
+	 * transaction.
+	 */
+	private List<Prepared> resolveRates(List<TransactionRequest> requests) {
+		try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+			var tasks = requests.stream()
+					.map(request -> CompletableFuture.supplyAsync(
+							() -> this.transactionTemplate.execute(status -> prepare(request,
+									currency(request.currencyShortname()), category(request.expenseCategory()))),
+							executor))
+					.toList();
+
+			List<Prepared> prepared = new ArrayList<>(requests.size());
+			for (var task : tasks) {
+				try {
+					// Everything is submitted before anything is joined, so the whole batch is in
+					// flight; joining inside the submission loop would serialise precisely what
+					// this
+					// method exists to parallelise.
+					prepared.add(task.get(this.batchTimeout.toMillis(), TimeUnit.MILLISECONDS));
+				} catch (InterruptedException ex) {
+					Thread.currentThread().interrupt();
+					throw new IllegalStateException("The batch was interrupted while resolving rates", ex);
+				} catch (TimeoutException ex) {
+					task.cancel(true);
+					throw new BatchResolutionFailedException(requests.size(), ex);
+				} catch (ExecutionException ex) {
+					throw unwrap(ex);
+				}
+			}
+			return prepared;
+		}
+	}
+
+	/**
+	 * A failure inside a task arrives wrapped, and an unknown currency or a
+	 * constraint violation would otherwise leave the API answering 500 for what is
+	 * a 404.
+	 */
+	private RuntimeException unwrap(ExecutionException ex) {
+		Throwable cause = ex.getCause();
+		if (cause instanceof RuntimeException runtime) {
+			return runtime;
+		}
+		return new BatchResolutionFailedException(1, ex);
+	}
+
+	/**
+	 * The store phase, in a transaction of its own because the caller of a batch
+	 * holds none.
+	 */
+	private AcceptedTransaction storeInItsOwnTransaction(Prepared prepared) {
+		return this.transactionTemplate.execute(status -> store(prepared));
+	}
+
+	/**
+	 * Everything the store phase needs, already resolved.
+	 *
+	 * <p>
+	 * The row is detached by the time it is stored, which is why the codes travel
+	 * with it rather than being resolved again on the far side of the phase
+	 * boundary.
+	 *
+	 * @param transaction
+	 *            the mapped row, with its conversion recorded when a rate was
+	 *            available
+	 * @param category
+	 *            the flag is decided per category, so the store phase still needs
+	 *            it
+	 */
+	private record Prepared(ExpenseTransaction transaction, ExpenseCategory category) {
+	}
+
+	/**
+	 * Maps the request and resolves its rate. Shared by both paths so the
+	 * single-request and the batch behaviour cannot drift apart.
+	 *
+	 * <p>
+	 * The rate is resolved here, before any lock: an external call takes seconds,
+	 * and holding a row lock across it would block every other transaction of the
+	 * client.
+	 */
+	private Prepared prepare(TransactionRequest request, Currency currency, ExpenseCategory category) {
 		// The instant and its month are the server's reading of the timestamp, in the
 		// one configured
 		// timezone, not the client's assertion about either.
 		Instant occurredAt = request.datetime().toInstant();
 		ExpenseTransaction transaction = this.transactionMapper.toEntity(request, currency, category.getId(),
 				occurredAt, this.monthBoundary.monthOf(occurredAt));
-		AcceptedTransaction accepted = new AcceptedTransaction(transaction, category.getCode(), currency.getCode());
 
-		// The rate is resolved before the lock is taken: an external call takes
-		// seconds, and holding a row
-		// lock across it would block every other transaction of the client.
 		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getAmount(), currency,
 				transaction.getOccurredMonth());
 		if (!conversion.isAvailable()) {
@@ -111,23 +263,36 @@ public class TransactionService {
 			// uncalculated rather than being invented. Such rows are recalculated once the
 			// rate appears.
 			// No flag is assigned and flag_calculated is derived from limit_exceeded, so
-			// the
-			// row stores itself as uncalculated: there is no method to call here and none
-			// to
+			// the row
+			// stores itself as uncalculated: there is no method to call here and none to
 			// forget.
-			log.warn("Stored a transaction of {} {} without a flag: no exchange rate available",
+			log.warn("A transaction of {} {} has no available rate and will be stored without a flag",
 					transaction.getAmount(), currency.getCode());
-			this.expenseTransactionRepository.save(transaction);
 			this.metricsRecorder.transactionAccepted(UNCALCULATED);
-			return accepted;
+			return new Prepared(transaction, category);
 		}
 		transaction.recordConversion(conversion.sumInLedger(), conversion.rate(), conversion.rateDate());
+		return new Prepared(transaction, category);
+	}
 
-		applyFlag(transaction, category);
+	/**
+	 * Flags and writes a prepared transaction. The caller holds the transaction.
+	 */
+	private AcceptedTransaction store(Prepared prepared) {
+		ExpenseTransaction transaction = prepared.transaction();
+		AcceptedTransaction accepted = new AcceptedTransaction(transaction, prepared.category().getCode(),
+				transaction.getCurrency().getCode());
+
+		// A null ledger amount means the rate was unavailable in prepare(), which is
+		// the only way to
+		// reach here without a conversion; the row then stores itself as unflagged.
+		if (transaction.getSumInLedger() != null) {
+			applyFlag(transaction, prepared.category());
+		}
 		this.expenseTransactionRepository.save(transaction);
-		log.debug("Stored {} {} on {} as {} {}, exceeded={}", transaction.getAmount(), currency.getCode(),
-				transaction.getOccurredAt(), transaction.getSumInLedger(), this.ledgerPolicy.currencyCode(),
-				transaction.getLimitExceeded());
+		log.debug("Stored {} {} on {} as {} {}, exceeded={}", transaction.getAmount(),
+				transaction.getCurrency().getCode(), transaction.getOccurredAt(), transaction.getSumInLedger(),
+				this.ledgerPolicy.currencyCode(), transaction.getLimitExceeded());
 		return accepted;
 	}
 

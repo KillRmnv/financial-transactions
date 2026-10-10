@@ -10,22 +10,29 @@ Feature: The client-facing API over HTTP
   Background:
     Given the account "0000000123" and the category "product"
 
+  # The specification's own table carries two columns that disagree: «сумма транзакции» says 100 on
+  # every row, and those sums do not produce the «остаток месячного лимита» beside them. The amounts
+  # below are recovered from the остаток column — 900−800, 800−100, 100−0, 0−(−100) — and they are the
+  # amounts that reproduce the flags the same table states. Requirement 6 asks for "the transactions of
+  # 3 and 13 January", and only these amounts yield exactly two.
+  #
+  # It also lands on the boundary requirement 5 names: the first 13 January brings the month to exactly
+  # 2000 against a limit of 2000, which is not exceeded. The second crosses it.
   Scenario: Case 1 over HTTP — only 3 and 13 January come back, with the limit that was exceeded
     Given a limit of "1000" USD was installed on "2022-01-01"
     And a transaction of "500" USD happened on "2022-01-02"
     And a transaction of "600" USD happened on "2022-01-03"
     And a limit of "2000" USD was installed on "2022-01-10"
-    And a transaction of "800" USD happened on "2022-01-11"
-    And a transaction of "100" USD happened on "2022-01-12"
+    And a transaction of "100" USD happened on "2022-01-11"
+    And a transaction of "700" USD happened on "2022-01-12"
     And a transaction of "100" USD happened on "2022-01-13"
     And a transaction of "100" USD happened on "2022-01-13"
     When the exceeded transactions for "2022-01" are requested
     Then the response is 200
-    And the response holds 3 exceeded transactions
+    And the response holds 2 exceeded transactions
     And the exceeded transactions are on these dates:
       | date       |
       | 2022-01-03 |
-      | 2022-01-13 |
       | 2022-01-13 |
     And the 1st exceeded transaction reports a limit of "1000" USD installed on "2022-01-01" in "USD"
     And the 2nd exceeded transaction reports a limit of "2000" USD installed on "2022-01-10" in "USD"
@@ -102,3 +109,59 @@ Feature: The client-facing API over HTTP
     Then 20 transactions are stored
     And the month's total is "2000" USD
     And exactly 10 transactions are flagged
+
+  # Optional requirement 1*: a batch resolves its rates in parallel. What is asserted here is the
+  # outcome — every transaction stored, converted, and the provider asked once per pair — because the
+  # concurrency itself is not observable from outside without a timing assertion.
+  Scenario: A batch spanning several currencies stores and converts every transaction
+    Given the account "0000000481" and the category "product"
+    And a limit of "1000" USD was installed on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And the provider answers "RUB" against "USD" at "0.0130" on "2022-01-01"
+    When a batch is posted with these transactions:
+      | currency | sum   | date       |
+      | KZT      | 400   | 2022-01-05 |
+      | RUB      | 100   | 2022-01-05 |
+      | USD      | 250.5 | 2022-01-06 |
+    Then the response is 201
+    And the response holds 3 stored transactions
+    And the 1st stored transaction is in currency "KZT"
+    And the 1st stored transaction totals "1.00" USD
+    And the 2nd stored transaction is in currency "RUB"
+    And the 2nd stored transaction totals "1.30" USD
+    And the 3rd stored transaction is in currency "USD"
+    And the 3rd stored transaction totals "250.50" USD
+    And 3 transactions are stored
+
+  Scenario: A batch asks the provider once for a pair it is asked twice about
+    Given the account "0000000482" and the category "product"
+    And a limit of "1000" USD was installed on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    When a batch is posted with these transactions:
+      | currency | sum   | date       |
+      | KZT      | 400   | 2022-01-05 |
+      | KZT      | 400   | 2022-01-05 |
+      | KZT      | 400   | 2022-01-06 |
+    Then the response is 201
+    And the response holds 3 stored transactions
+    And the provider was asked 1 times for the symbol "KZT/USD"
+    And 3 transactions are stored
+
+  Scenario: A batch with an invalid transaction is refused and nothing is stored
+    When a batch is posted with these transactions:
+      | currency | sum   | date       |
+      | USD      | 100   | 2022-01-05 |
+      | USD      | -5    | 2022-01-05 |
+    Then the response is 400
+    And the response is a problem of type "validation-failed"
+    And 0 transactions are stored
+
+  Scenario: A batch naming a currency the lookup does not have is refused
+    Given the account "0000000483" and the category "product"
+    When a batch is posted with these transactions:
+      | currency | sum   | date       |
+      | KZT      | 400   | 2022-01-05 |
+      | ZZZ      | 400   | 2022-01-05 |
+    Then the response is 404
+    And the response is a problem of type "not-found"
+    And 0 transactions are stored

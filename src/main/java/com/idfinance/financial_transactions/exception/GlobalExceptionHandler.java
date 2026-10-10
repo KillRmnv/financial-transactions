@@ -170,6 +170,11 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 			// the caller
 			// the service is broken. The distinction decides whether a client retries.
 			case LockUnavailableException ignored -> HttpStatus.SERVICE_UNAVAILABLE;
+			// 503 rather than 500, and retryable: nothing was stored, so the caller may
+			// send the
+			// batch again. A 504 would promise a gateway gave up; the wait ended inside the
+			// service.
+			case BatchResolutionFailedException ignored -> HttpStatus.SERVICE_UNAVAILABLE;
 			default -> HttpStatus.INTERNAL_SERVER_ERROR;
 		};
 	}

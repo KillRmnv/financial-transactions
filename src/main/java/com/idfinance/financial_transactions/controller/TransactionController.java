@@ -13,6 +13,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -41,6 +44,32 @@ public final class TransactionController {
 	private final TransactionMapper transactionMapper;
 
 	private final MonthBoundary monthBoundary;
+
+	@Operation(summary = "Accept a batch of expense operations", description = """
+			Stores several transactions in one call. Their exchange rates are resolved concurrently,
+			because a currency the service has never seen costs an external call measured in seconds, and
+			a client's transactions for a day are usually spread across several of them.
+
+			Each transaction is still flagged one at a time under the limit's row lock, so a batch does
+			not get a different answer than the same transactions sent individually: the running total is
+			read after the previous one has committed, in the order the request lists them.
+
+			A transaction whose currency has no available rate is stored with `limitCalculated` false
+			rather than rejected. A failure that is not about rates — an unknown currency — rejects the
+			whole batch.""")
+	@ApiResponse(responseCode = "201", description = "Every transaction stored, in the order it was sent")
+	@ApiResponse(responseCode = "400", description = "The body failed validation, or the batch was empty or too large", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+	@ApiResponse(responseCode = "404", description = "Unknown category or currency in one of the transactions", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+	@ApiResponse(responseCode = "503", description = "The rates for the batch could not be obtained in time; nothing was stored, so the batch may be sent again", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
+	@RateLimited(quota = "ingestion")
+	@PostMapping("/batch")
+	ResponseEntity<List<TransactionResponse>> acceptBatch(
+			@Valid @RequestBody @NotEmpty @Size(max = 100) List<@Valid TransactionRequest> requests) {
+		var accepted = this.transactionService.acceptBatch(requests);
+		return ResponseEntity.status(HttpStatus.CREATED).body(accepted.stream()
+				.map(row -> this.transactionMapper.toResponse(row, this.monthBoundary.zone())).toList());
+	}
 
 	@Operation(summary = "Accept an expense operation", description = """
 			Stores the transaction, converts it to USD and flags it when the month's total goes over

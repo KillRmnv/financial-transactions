@@ -37,6 +37,8 @@ public class StubRatesProvider implements RatesProvider {
 
 	private volatile boolean currencyListingFails;
 
+	private int currencyListingCalls;
+
 	public StubRatesProvider(LedgerPolicy ledgerPolicy) {
 		this.ledgerPolicy = ledgerPolicy;
 	}
@@ -79,10 +81,28 @@ public class StubRatesProvider implements RatesProvider {
 
 	@Override
 	public List<PublishedCurrency> publishedCurrencies() {
+		this.currencyListingCalls++;
 		if (this.currencyListingFails) {
 			throw new IllegalStateException("The rates provider is unreachable");
 		}
 		return this.published;
+	}
+
+	/**
+	 * How many times the currency list was asked for.
+	 *
+	 * <p>
+	 * A job that is switched off must be asserted by the call <em>not</em> being
+	 * made rather than by the lookup not growing: with the list left empty the
+	 * lookup would not grow either way, and the scenario would pass against an
+	 * implementation that simply paid the credits anyway.
+	 */
+	public int currencyListingCalls() {
+		return this.currencyListingCalls;
+	}
+
+	public void resetCurrencyListingCalls() {
+		this.currencyListingCalls = 0;
 	}
 
 	@Override

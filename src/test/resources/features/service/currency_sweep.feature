@@ -82,3 +82,37 @@ Feature: The weekly sweep of the currency lookup
     When the weekly sweep runs
     Then the currency "ZWL" is not in the lookup
     And a transaction in "ZWL" for "100" USD is refused as not found
+
+  # The switch lives in scheduled_job rather than in a property, because a bean condition is
+  # settled when the context starts. These scenarios are the only proof that it still costs
+  # nothing to be off: no restart, and the provider is not called at all.
+  Scenario: A sweep switched off does not call the provider
+    Given the provider publishes these currencies:
+      | code | name |
+      | ZWL  | Zimbabwean Dollar |
+    And the weekly currency import is switched off
+    When the weekly sweep runs
+    Then the provider was not asked for its currency list
+    And the currency lookup grew by 0 codes
+    And the currency "ZWL" is not in the lookup
+
+  Scenario: Switching the sweep back on needs no restart
+    Given the provider publishes these currencies:
+      | code | name |
+      | ZWL  | Zimbabwean Dollar |
+    And the weekly currency import is switched off
+    When the weekly sweep runs
+    Then the provider was not asked for its currency list
+    When the weekly currency import is switched on
+    And the weekly sweep runs
+    Then the provider was asked for its currency list
+    And the currency lookup grew by 1 codes
+
+  Scenario: The switch survives being set to the value it already has
+    Given the provider publishes these currencies:
+      | code | name |
+      | ZWL  | Zimbabwean Dollar |
+    And the weekly currency import is switched on
+    When the weekly sweep runs
+    Then the provider was asked for its currency list
+    And the currency lookup grew by 1 codes
