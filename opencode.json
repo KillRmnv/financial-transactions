@@ -8,6 +8,29 @@
       "environment": {
         "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
       }
+    },
+    "github": {
+      "type": "local",
+      "command": [
+        "docker", "run", "-i", "--rm",
+        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN={env:GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "enabled": true,
+      "environment": {
+        "GITHUB_TOOLSETS": "context,repos,issues,pull_requests,actions",
+        "GITHUB_READ_ONLY": "1"
+      }
+    },
+    "postgres": {
+      "type": "local",
+      "command": ["npx", "-y", "@contextflo/postgres-mcp"],
+      "enabled": true,
+      "environment": {
+        "DATABASE_URL": "postgresql://financial:financial@localhost:5432/financial",
+        "PG_READONLY": "true",
+        "PG_STATEMENT_TIMEOUT_MS": "5000"
+      }
     }
   }
 }

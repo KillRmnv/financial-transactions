@@ -8,7 +8,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-financial}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-financial}
     ports:
-      - "5432:5432"
+      # Host side from the environment, container side fixed: the port a second container
+      # publishes must not move, or nothing else in the stack could find the database.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     # The server's own limit, not the app's. The app holds at most 20 connections per instance, so three
@@ -30,7 +32,7 @@ services:
     image: redis:7
     container_name: financial-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     # Without maxmemory a cache is the first thing to fill a container's memory, and Redis dies rather
     # than evicting: the default policy is noeviction, so the failure mode is the cache being unavailable
     # to the application. allkeys-lru is what a cache wants; it is the wrong policy for a queue, which is
@@ -52,7 +54,7 @@ services:
     build: .
     container_name: financial-app
     ports:
-      - "8080:8080"
+      - "${APP_PORT:-8080}:8080"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-financial}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-financial}
@@ -61,6 +63,9 @@ services:
       RATES_API_BASE_URL: ${RATES_API_BASE_URL:-}
       RATES_API_KEY: ${RATES_API_KEY:-}
       RATES_SOURCE: ${RATES_SOURCE:-twelvedata}
+      # Was read by application.yml and never passed here, which pinned the fallback to the
+      # public instance: there was no way to point it at a self-hosted Frankfurter.
+      FRANKFURTER_API_BASE_URL: ${FRANKFURTER_API_BASE_URL:-https://api.frankfurter.dev}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-local}
     mem_limit: 1g

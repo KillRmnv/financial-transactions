@@ -27,30 +27,32 @@ Feature: The boundaries of the request payload
     When a transaction of <sum> USD happened on "2022-01-05"
     Then the response is <status>
 
-    Examples: Boundaries of @DecimalMin(0.00, inclusive=false) and @Digits(integer=12, fraction=2)
-      | sum              | status | why                                       |
-      | "0.00"           | 400    | the minimum, excluded by inclusive=false   |
-      | "0"              | 400    | zero, written without decimals             |
-      | "0.01"           | 201    | the smallest sum the API accepts           |
-      | "0.99"           | 201    | the largest number of fraction digits      |
-      | "100.00"         | 201    | an ordinary amount                         |
-      | "999999999999.99" | 201   | 12 integer digits, the maximum             |
-      | "1000000000000.00" | 400  | 13 integer digits, one too many            |
-      | "0.001"          | 400    | 3 fraction digits, one too many            |
-      | "-0.01"          | 400    | negative                                   |
-      | "-1000.00"       | 400    | a large negative                           |
+    Examples: Boundaries of @DecimalMin(0.00, inclusive=false), then of the column the row lands in
+      | sum               | status | why                                        |
+      | "0.00"            | 400    | the minimum, excluded by inclusive=false   |
+      | "0"               | 400    | zero, written without decimals             |
+      | "0.01"            | 201    | the smallest sum the API accepts           |
+      | "0.001"           | 201    | three fraction digits, which is a scale a low-rate currency needs |
+      | "0.00000001"      | 201    | eight fraction digits, the storage scale   |
+      | "0.000000001"     | 400    | nine fraction digits, one past the column  |
+      | "100.00"          | 201    | an ordinary amount                         |
+      | "999999999999.99" | 201    | 12 integer digits, the storage maximum     |
+      | "1000000000000.00" | 400   | 13 integer digits, one past the column     |
+      | "-0.01"           | 400    | negative                                   |
+      | "-1000.00"        | 400    | a large negative                           |
 
   Scenario Outline: The sum of a limit follows the same boundaries
     When a limit of <sum> USD is requested on "2022-01-01"
     Then the response is <status>
 
     Examples:
-      | sum              | status |
-      | "0.00"           | 400    |
-      | "0.01"           | 201    |
-      | "999999999999.99" | 201   |
-      | "1000000000000.00" | 400  |
-      | "-0.01"          | 400    |
+      | sum               | status |
+      | "0.00"            | 400    |
+      | "0.01"            | 201    |
+      | "0.001"           | 201    |
+      | "999999999999.99" | 201    |
+      | "1000000000000.00" | 400   |
+      | "-0.01"           | 400    |
 
   Scenario Outline: The account is exactly ten digits
     When a transaction from account "<account>" of "10" USD happened on "2022-01-05"
