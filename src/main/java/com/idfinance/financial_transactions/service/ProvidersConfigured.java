@@ -14,9 +14,6 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
 /**
  * Matches when at least one rates provider is configured, whichever it is.
  *
- * <p>
- * This replaces the expression that used to name every provider's property:
- *
  * <pre>
  * "'${app.rates.base-url:}' != '' or '${app.rates.frankfurter.base-url:}' != ''"
  * </pre>
