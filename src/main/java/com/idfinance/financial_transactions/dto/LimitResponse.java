@@ -3,6 +3,8 @@ package com.idfinance.financial_transactions.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * A limit, with the amount already spent in the current month.
@@ -19,6 +21,7 @@ import java.time.OffsetDateTime;
  * moved.
  */
 @Schema(description = "A limit and what has been spent against it in the current month")
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record LimitResponse(
 
 		String accountFrom,

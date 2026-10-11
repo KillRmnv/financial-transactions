@@ -53,8 +53,8 @@ Feature: A rate the paid provider does not have
 
   Scenario: A transaction older than the free tier is still priced
     Given the account "1234567890" and the category "product"
-    And the paid provider has no rate for "KZT" against "USD" on "2022-01-01"
-    And the fallback answers "KZT" against "USD" on "2022-01-01" at "0.0023"
+    And the paid provider has no rate for "KZT" against "USD" on "2022-01-03"
+    And the fallback answers "KZT" against "USD" on "2022-01-03" at "0.0023"
     And a limit of "1000" USD was installed on "2022-01-01"
     When a transaction in "KZT" for "500.00" USD happened on "2022-01-03"
     Then the response is 201

@@ -115,17 +115,17 @@ Feature: The boundaries of the request payload
     When a transaction is posted with the body:
       """
       {
-        "accountFrom": <accountFrom>,
-        "accountTo": "9999999999",
-        "currencyShortname": "USD",
+        "account_from": <accountFrom>,
+        "account_to": "9999999999",
+        "currency_shortname": "USD",
         "sum": 10.00,
-        "expenseCategory": "product",
+        "expense_category": "product",
         "datetime": "2022-01-05T00:00:00+00:00"
       }
       """
     Then the response is 400
     And the response is a problem of type "validation-failed"
-    And the violation names the field "accountFrom"
+    And the violation names the field "account_from"
 
     Examples:
       | accountFrom  |
@@ -136,11 +136,11 @@ Feature: The boundaries of the request payload
   Scenario: A body carrying only one field of the six
     When a transaction is posted with the body:
       """
-      {"accountFrom": "0000000123"}
+      {"account_from": "0000000123"}
       """
     Then the response is 400
     And the response is a problem of type "validation-failed"
-    And the violation names the field "accountTo"
+    And the violation names the field "account_to"
 
   Scenario: A body that is not JSON at all
     When a transaction is posted with the body:
@@ -153,7 +153,7 @@ Feature: The boundaries of the request payload
   Scenario: The body has to declare that it is JSON
     When a transaction is posted with an untyped body:
       """
-      {"accountFrom": "0000000123", "accountTo": "9999999999", "currencyShortname": "USD", "sum": 10.00, "expenseCategory": "product", "datetime": "2022-01-05T00:00:00+00:00"}
+      {"account_from": "0000000123", "account_to": "9999999999", "currency_shortname": "USD", "sum": 10.00, "expense_category": "product", "datetime": "2022-01-05T00:00:00+00:00"}
       """
     Then the response is 415
 

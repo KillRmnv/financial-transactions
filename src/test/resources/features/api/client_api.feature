@@ -189,7 +189,7 @@ Feature: The client-facing API over HTTP
 
   Scenario: A converted transaction says which currency its sumInLedger is in
     Given the account "0000000456" and the category "product"
-    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-05"
     And a limit of "2000" USD was installed on "2022-01-01"
     When a transaction in "KZT" for "400" USD happened on "2022-01-05"
     Then the response is 201
@@ -197,7 +197,7 @@ Feature: The client-facing API over HTTP
 
   Scenario: A rate published by the provider converts the transaction over the wire
     Given the account "0000000456" and the category "product"
-    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-05"
     And a limit of "2000" USD was installed on "2022-01-01"
     When a transaction in "KZT" for "400" USD happened on "2022-01-05"
     Then the response is 201
@@ -210,11 +210,11 @@ Feature: The client-facing API over HTTP
   # read correctly, and never once populated by anything real.
   Scenario: A day with no close of its own is priced from the last close before it
     Given the account "0000000457" and the category "product"
-    And the provider has no close for "KZT" against "USD" on "2022-01-01"
+    And the provider has no close for "KZT" against "USD" on "2022-01-05"
     And the provider answers a window for "KZT" against "USD" with:
       | date       | close  |
-      | 2021-12-29 | 0.0024 |
-      | 2021-12-30 | 0.0025 |
+      | 2022-01-03 | 0.0024 |
+      | 2022-01-04 | 0.0025 |
     And a limit of "2000" USD was installed on "2022-01-01"
     When a transaction in "KZT" for "400" USD happened on "2022-01-05"
     Then the response is 201
@@ -246,8 +246,8 @@ Feature: The client-facing API over HTTP
   Scenario: A batch spanning several currencies stores and converts every transaction
     Given the account "0000000481" and the category "product"
     And a limit of "1000" USD was installed on "2022-01-01"
-    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
-    And the provider answers "RUB" against "USD" at "0.0130" on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-05"
+    And the provider answers "RUB" against "USD" at "0.0130" on "2022-01-05"
     When a batch is posted with these transactions:
       | currency | sum   | date       |
       | KZT      | 400   | 2022-01-05 |
@@ -267,16 +267,21 @@ Feature: The client-facing API over HTTP
   # purpose: the coordinator collapses a call only while it is still in flight, and an instant answer is
   # finished before the next transaction starts asking — the assertion would then depend on how busy the
   # machine is rather than on the code.
+  #
+  # All three are on one day, and that is now part of what the scenario means rather than a detail of the
+  # fixture. A rate is the rate of a day, so two days are two questions and two calls — the batch and the
+  # coordinator both key on the pair *and* the day, and a scenario that spread these over the 5th and the
+  # 6th would have been asserting a merge that is deliberately not done.
   Scenario: A batch asks the provider once for a pair it is asked twice about
     Given the account "0000000482" and the category "product"
     And a limit of "1000" USD was installed on "2022-01-01"
-    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.0025" on "2022-01-05"
     And the provider answers slowly
     When a batch is posted with these transactions:
       | currency | sum   | date       |
       | KZT      | 400   | 2022-01-05 |
       | KZT      | 400   | 2022-01-05 |
-      | KZT      | 400   | 2022-01-06 |
+      | KZT      | 400   | 2022-01-05 |
     Then the response is 201
     And the response holds 3 stored transactions
     And the provider was asked 1 times for the symbol "KZT/USD"
@@ -307,7 +312,7 @@ Feature: The client-facing API over HTTP
   Scenario: A pair the provider publishes the other way round is converted by division
     Given the account "0000000484" and the category "product"
     And the provider does not publish "KZT" against "USD"
-    And the provider answers "USD" against "KZT" at "450.0000" on "2022-01-01"
+    And the provider answers "USD" against "KZT" at "450.0000" on "2022-01-05"
     When a transaction in "KZT" for "10000.45" USD happened on "2022-01-05"
     Then the response is 201
     And the only transaction is converted at "22.22322222" USD
@@ -320,7 +325,7 @@ Feature: The client-facing API over HTTP
   # unit that rounds on the way in would satisfy the second and break the first.
   Scenario: What the row keeps exactly, the response rounds for reading
     Given the account "0000000486" and the category "product"
-    And the provider answers "KZT" against "USD" at "0.002222" on "2022-01-01"
+    And the provider answers "KZT" against "USD" at "0.002222" on "2022-01-05"
     When a transaction in "KZT" for "10000.45" USD happened on "2022-01-05"
     Then the response is 201
     And the only transaction is converted at "22.22099990" USD

@@ -1,6 +1,8 @@
 package com.idfinance.financial_transactions.dto;
 
 import jakarta.validation.constraints.NotNull;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * Which way to move a tracked currency's sweep.
@@ -12,5 +14,6 @@ import jakarta.validation.constraints.NotNull;
  * idempotent retry is still a success rather than a conflict.
  *
  */
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record CurrencyPairRequest(@NotNull Boolean active) {
 }

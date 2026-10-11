@@ -1,6 +1,7 @@
 package com.idfinance.financial_transactions.exception;
 
 import com.idfinance.financial_transactions.web.RateLimitExceededException;
+import com.idfinance.financial_transactions.web.WireNames;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
@@ -191,10 +192,33 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 		return ex.getBindingResult().getAllErrors().stream().map(GlobalExceptionHandler::toViolation).toList();
 	}
 
+	/**
+	 * Reports the field under the name the caller sent.
+	 *
+	 * <p>
+	 * Bean Validation knows only the Java component — {@code accountFrom} — and the
+	 * wire is {@code account_from}. Naming the component would point the caller at
+	 * something that does not exist in its own request, and the error would be the
+	 * one message in the API that could not be copy-pasted back into a search.
+	 *
+	 * <p>
+	 * The name comes from the same strategy that names the field rather than from a
+	 * table kept beside it: a list of spellings here would be a second place to
+	 * update the day a field is renamed, and the day it is not updated is a
+	 * violation pointing at a name the client never typed.
+	 */
 	private static FieldViolation toViolation(ObjectError error) {
 		String field = (error instanceof FieldError fieldError) ? fieldError.getField() : error.getObjectName();
 		String message = Optional.ofNullable(error.getDefaultMessage()).orElse(INVALID_FIELD_DETAIL);
-		return new FieldViolation(field, message);
+		return new FieldViolation(onTheWire(field), message);
+	}
+
+	/** Translates a possibly nested component name, translating only the leaf. */
+	private static String onTheWire(String field) {
+		int lastDot = field.lastIndexOf('.');
+		String leaf = (lastDot < 0) ? field : field.substring(lastDot + 1);
+		String translated = WireNames.toWire(leaf);
+		return (lastDot < 0) ? translated : field.substring(0, lastDot + 1) + translated;
 	}
 
 	/**

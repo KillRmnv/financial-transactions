@@ -3,6 +3,8 @@ package com.idfinance.financial_transactions.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * A transaction that exceeded the limit, with the limit that was actually
@@ -14,6 +16,7 @@ import java.time.OffsetDateTime;
  * {@code limit_currency_shortname}.
  */
 @Schema(description = "A transaction that exceeded a limit, with the limit it was actually measured against")
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record TransactionWithLimitResponse(
 
 		String accountFrom, String accountTo,

@@ -1,6 +1,8 @@
 package com.idfinance.financial_transactions.dto;
 
 import java.time.Instant;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * A tracked currency: whether the daily sweep is paying for its rate, and since
@@ -13,5 +15,6 @@ import java.time.Instant;
  * and it does not move when the currency is deactivated and reactivated.
  *
  */
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record CurrencyPairResponse(String code, boolean active, Instant createdAt) {
 }

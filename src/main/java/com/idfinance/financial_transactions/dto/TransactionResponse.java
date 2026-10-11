@@ -3,6 +3,8 @@ package com.idfinance.financial_transactions.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * Answer to a transaction ingestion call.
@@ -14,6 +16,7 @@ import java.time.OffsetDateTime;
  * {@code false} there would be a lie.
  */
 @Schema(description = "The stored transaction and the flag that was computed for it")
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record TransactionResponse(
 
 		String accountFrom, String accountTo,

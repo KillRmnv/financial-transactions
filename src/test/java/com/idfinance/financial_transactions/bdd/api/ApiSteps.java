@@ -103,8 +103,8 @@ class ApiSteps {
 	@Given(value = "a limit of {string} USD was installed on {string}")
 	void aLimitWasInstalled(String sum, String isoDate) {
 		this.clock.set(LocalDate.parse(isoDate).atStartOfDay().toInstant(ZoneOffset.UTC));
-		this.response = this.post("/api/v1/limits",
-				Map.of("accountFrom", this.accountFrom, "expenseCategory", this.category, "sum", new BigDecimal(sum)));
+		this.response = this.post("/api/v1/limits", Map.of("account_from", this.accountFrom, "expense_category",
+				this.category, "sum", new BigDecimal(sum)));
 		((ObjectAssert) ((AbstractObjectAssert) ((Object) Assertions.assertThat(this.response.getStatusCode())))
 				.as("installing the limit", new Object[0])).isEqualTo(HttpStatus.CREATED);
 	}
@@ -122,7 +122,7 @@ class ApiSteps {
 
 	@Then("the {word} exceeded transaction is in the category {string}")
 	void theExceededTransactionIsInCategory(String ordinal, String category) {
-		Assertions.assertThat(rowAt(ordinal).get("expenseCategory").asText()).as("the category of the %s row", ordinal)
+		Assertions.assertThat(rowAt(ordinal).get("expense_category").asText()).as("the category of the %s row", ordinal)
 				.isEqualTo(category);
 	}
 
@@ -161,8 +161,8 @@ class ApiSteps {
 	@When(value = "a limit of {string} USD is requested on {string}")
 	void aLimitIsRequested(String sum, String isoDate) {
 		this.clock.set(LocalDate.parse(isoDate).atStartOfDay().toInstant(ZoneOffset.UTC));
-		this.response = this.post("/api/v1/limits",
-				Map.of("accountFrom", this.accountFrom, "expenseCategory", this.category, "sum", new BigDecimal(sum)));
+		this.response = this.post("/api/v1/limits", Map.of("account_from", this.accountFrom, "expense_category",
+				this.category, "sum", new BigDecimal(sum)));
 		this.responseBody = this.readBody();
 	}
 
@@ -243,13 +243,13 @@ class ApiSteps {
 	void anExceededTransactionReports(String ordinal, String sum, String isoDate, String currency) {
 		JsonNode row = this.rowAt(ordinal);
 		SoftAssertions softly = new SoftAssertions();
-		((BooleanAssert) softly.assertThat(row.get("limitExceeded").asBoolean()).as("the flag of the %s row", ordinal))
+		((BooleanAssert) softly.assertThat(row.get("limit_exceeded").asBoolean()).as("the flag of the %s row", ordinal))
 				.isTrue();
-		((BigDecimalAssert) softly.assertThat(row.get("limitSum").decimalValue()).as("the limit sum of the %s row",
+		((BigDecimalAssert) softly.assertThat(row.get("limit_sum").decimalValue()).as("the limit sum of the %s row",
 				new Object[]{ordinal})).isEqualByComparingTo(new BigDecimal(sum));
-		((StringAssert) softly.assertThat(row.get("limitDatetime").asText()).as("the limit date of the %s row",
+		((StringAssert) softly.assertThat(row.get("limit_datetime").asText()).as("the limit date of the %s row",
 				ordinal)).startsWith(isoDate);
-		((StringAssert) softly.assertThat(row.get("limitCurrencyShortname").asText())
+		((StringAssert) softly.assertThat(row.get("limit_currency_shortname").asText())
 				.as("the limit currency of the %s row", ordinal)).isEqualTo(currency);
 		softly.assertAll();
 	}
@@ -280,11 +280,11 @@ class ApiSteps {
 		List<Callable<Integer>> posts = IntStream.range(0, requests).<Callable<Integer>>mapToObj((index) -> () -> {
 			startLine.await(30, TimeUnit.SECONDS);
 			Map<String, Object> body = new LinkedHashMap<>();
-			body.put("accountFrom", this.accountFrom);
-			body.put("accountTo", COUNTERPART);
-			body.put("currencyShortname", "USD");
+			body.put("account_from", this.accountFrom);
+			body.put("account_to", COUNTERPART);
+			body.put("currency_shortname", "USD");
 			body.put("sum", amount);
-			body.put("expenseCategory", this.category);
+			body.put("expense_category", this.category);
 			body.put("datetime", day.atStartOfDay().atOffset(ZoneOffset.UTC).toString());
 			try {
 				ResponseEntity<String> posted = RestClient.builder().baseUrl(this.baseUrl)
@@ -403,7 +403,7 @@ class ApiSteps {
 	@Then("the limit for {string} reports {string} of the limit")
 	void theLimitReportsItsAmount(String category, String limitSum) {
 		JsonNode row = limitRowFor(category);
-		Assertions.assertThat(row.get("limitSum").decimalValue()).as("the limit on %s", category)
+		Assertions.assertThat(row.get("limit_sum").decimalValue()).as("the limit on %s", category)
 				.isEqualByComparingTo(new BigDecimal(limitSum));
 	}
 
@@ -418,7 +418,7 @@ class ApiSteps {
 	private JsonNode limitRowFor(String category) {
 		JsonNode row = null;
 		for (JsonNode candidate : this.responseBody) {
-			if (category.equals(candidate.get("expenseCategory").asText())) {
+			if (category.equals(candidate.get("expense_category").asText())) {
 				row = candidate;
 			}
 		}
@@ -440,7 +440,7 @@ class ApiSteps {
 		// the assertion that would notice the aggregation being dropped or the join
 		// losing the category.
 		SoftAssertions softly = new SoftAssertions();
-		softly.assertThat(row.get("spentLedger").decimalValue()).as("the month's total against the limit")
+		softly.assertThat(row.get("spent_ledger").decimalValue()).as("the month's total against the limit")
 				.isEqualByComparingTo(new BigDecimal(spent));
 		softly.assertThat(row.get("remaining").decimalValue()).as("limitSum minus spentLedger")
 				.isEqualByComparingTo(new BigDecimal(remaining));
@@ -449,27 +449,27 @@ class ApiSteps {
 		// for the ledger column, because those are two separate fields that happen to
 		// carry the
 		// same value today. A ledger moved to another currency would have to move both.
-		softly.assertThat(row.get("limitCurrencyShortname").asText()).as("the ledger currency of the limit")
+		softly.assertThat(row.get("limit_currency_shortname").asText()).as("the ledger currency of the limit")
 				.isEqualTo("USD");
-		softly.assertThat(row.get("ledgerCurrency").asText()).as("the currency spentLedger is in").isEqualTo("USD");
+		softly.assertThat(row.get("ledger_currency").asText()).as("the currency spentLedger is in").isEqualTo("USD");
 		softly.assertAll();
 	}
 
 	@Then("the limit for {string} is the automatic fallback")
 	void theLimitIsTheFallback(String category) {
-		Assertions.assertThat(limitRowOf(category).get("limitDefault").asBoolean())
+		Assertions.assertThat(limitRowOf(category).get("limit_default").asBoolean())
 				.as("%s marked as the automatic fallback", category).isTrue();
 	}
 
 	@Then("the limit for {string} is not the automatic fallback")
 	void theLimitIsNotTheFallback(String category) {
-		Assertions.assertThat(limitRowOf(category).get("limitDefault").asBoolean())
+		Assertions.assertThat(limitRowOf(category).get("limit_default").asBoolean())
 				.as("%s marked as an installed limit", category).isFalse();
 	}
 
 	@Then("the limit for {string} was installed on {string}")
 	void theLimitWasInstalledOn(String category, String isoDate) {
-		Assertions.assertThat(limitRowOf(category).get("limitDatetime").asText())
+		Assertions.assertThat(limitRowOf(category).get("limit_datetime").asText())
 				.as("the installation date of the %s limit", category).startsWith(isoDate);
 	}
 
@@ -479,19 +479,19 @@ class ApiSteps {
 		// database
 		// and has no installation event, and 1 January 1970 would be a worse answer
 		// than none.
-		Assertions.assertThat(limitRowOf(category).get("limitDatetime").isNull())
+		Assertions.assertThat(limitRowOf(category).get("limit_datetime").isNull())
 				.as("the installation date of the %s limit", category).isTrue();
 	}
 
 	@Then("the transaction reports its ledger amount in {string}")
 	void theTransactionReportsItsLedgerAmountIn(String expected) {
-		Assertions.assertThat(this.responseBody.get("ledgerCurrency").asText())
+		Assertions.assertThat(this.responseBody.get("ledger_currency").asText())
 				.as("the currency sumInLedger is expressed in").isEqualTo(expected);
 	}
 
 	private JsonNode limitRowOf(String category) {
 		for (JsonNode row : this.responseBody) {
-			if (category.equals(row.get("expenseCategory").asText())) {
+			if (category.equals(row.get("expense_category").asText())) {
 				return row;
 			}
 		}
@@ -552,11 +552,11 @@ class ApiSteps {
 	void aBatchIsPosted(DataTable table) {
 		List<Map<String, Object>> body = table.asMaps(String.class, String.class).stream().map((row) -> {
 			Map<String, Object> transaction = new LinkedHashMap<>();
-			transaction.put("accountFrom", this.accountFrom);
-			transaction.put("accountTo", COUNTERPART);
-			transaction.put("currencyShortname", row.get("currency"));
+			transaction.put("account_from", this.accountFrom);
+			transaction.put("account_to", COUNTERPART);
+			transaction.put("currency_shortname", row.get("currency"));
 			transaction.put("sum", new BigDecimal(row.get("sum")));
-			transaction.put("expenseCategory", this.category);
+			transaction.put("expense_category", this.category);
 			transaction.put("datetime",
 					LocalDate.parse(row.get("date")).atStartOfDay().atOffset(ZoneOffset.UTC).toString());
 			return transaction;
@@ -578,9 +578,9 @@ class ApiSteps {
 	void theStoredTransactionTotals(String ordinal, String expected) {
 		JsonNode row = rowAt(ordinal);
 		SoftAssertions softly = new SoftAssertions();
-		softly.assertThat(row.get("sumInLedger").decimalValue()).as("the converted amount")
+		softly.assertThat(row.get("sum_in_ledger").decimalValue()).as("the converted amount")
 				.isEqualByComparingTo(new BigDecimal(expected));
-		softly.assertThat(row.get("limitExceeded").asBoolean()).as("the flag was computed").isNotNull();
+		softly.assertThat(row.get("limit_exceeded").asBoolean()).as("the flag was computed").isNotNull();
 		softly.assertAll();
 	}
 
@@ -597,14 +597,14 @@ class ApiSteps {
 	 */
 	@Then("the accepted transaction answers with a ledger amount of {string} USD")
 	void theAcceptedTransactionAnswersWithALedgerAmountOf(String expected) {
-		Assertions.assertThat(this.responseBody.get("sumInLedger").decimalValue())
+		Assertions.assertThat(this.responseBody.get("sum_in_ledger").decimalValue())
 				.as("the converted amount as the client is shown it").isEqualByComparingTo(new BigDecimal(expected));
 	}
 
 	@Then("the {word} stored transaction is in currency {string}")
 	void theStoredTransactionIsInCurrency(String ordinal, String currency) {
 		JsonNode row = rowAt(ordinal);
-		Assertions.assertThat(row.get("currencyShortname").asText()).as("the currency of the %s transaction", ordinal)
+		Assertions.assertThat(row.get("currency_shortname").asText()).as("the currency of the %s transaction", ordinal)
 				.isEqualTo(currency);
 	}
 
@@ -806,11 +806,11 @@ class ApiSteps {
 	private Map<String, Object> transactionBody(String sum, String currency, String category, String moment,
 			String accountFrom) {
 		LinkedHashMap<String, Object> body = new LinkedHashMap<String, Object>();
-		body.put("accountFrom", accountFrom);
-		body.put("accountTo", COUNTERPART);
-		body.put("currencyShortname", currency);
+		body.put("account_from", accountFrom);
+		body.put("account_to", COUNTERPART);
+		body.put("currency_shortname", currency);
 		body.put("sum", new BigDecimal(sum));
-		body.put("expenseCategory", category);
+		body.put("expense_category", category);
 		body.put("datetime", moment);
 		return body;
 	}

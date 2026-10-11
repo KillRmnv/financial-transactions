@@ -106,11 +106,11 @@ class RateLimitSteps {
 	void transactionsArePosted(int count, String accountFrom) {
 		for (int i = 0; i < count; i++) {
 			Map<String, Object> body = new LinkedHashMap<>();
-			body.put("accountFrom", accountFrom);
-			body.put("accountTo", "9999999999");
-			body.put("currencyShortname", "USD");
+			body.put("account_from", accountFrom);
+			body.put("account_to", "9999999999");
+			body.put("currency_shortname", "USD");
 			body.put("sum", new BigDecimal("10.00"));
-			body.put("expenseCategory", "product");
+			body.put("expense_category", "product");
 			body.put("datetime", "2022-01-05T00:00:00+00:00");
 
 			ResponseEntity<String> posted = exchange(this.client().post().uri("/api/v1/transactions").body(body));
