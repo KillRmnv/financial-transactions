@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.service.ConditionalOnProviderConfigured;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import io.github.resilience4j.core.IntervalFunction;
@@ -16,7 +17,6 @@ import java.util.Optional;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -249,11 +249,11 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 							.queryParam("interval", "1day").queryParam("apikey", apiKey())).build())
 					.retrieve().body(TimeSeriesResponse.class);
 		} catch (HttpClientErrorException.NotFound ex) {
-			log.debug("{} has no symbol {}: {}", source(), symbol, ex.getResponseBodyAsString());
+			log.debug("{} has no symbol {}: {}", source(), symbol, SafeLog.failure(ex));
 			return null;
 		} catch (HttpClientErrorException.BadRequest ex) {
 			if (ex.getResponseBodyAsString().contains(NO_DATA)) {
-				log.debug("{} has no data before the date asked for: {}", source(), ex.getResponseBodyAsString());
+				log.debug("{} has no data before the date asked for: {}", source(), SafeLog.failure(ex));
 				return null;
 			}
 			throw ex;
@@ -314,8 +314,8 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 							.queryParam("apikey", apiKey()).build())
 					.retrieve().body(SymbolSearchResponse.class);
 		} catch (RestClientResponseException ex) {
-			log.warn("Could not list the pairs of {}: {} ({} {})", source(), ex.getMessage(),
-					ex.getStatusCode().value(), ex.getResponseBodyAsString());
+			log.warn("Could not list the pairs of {}: {} ({} {})", source(), SafeLog.failure(ex),
+					ex.getStatusCode().value(), SafeLog.scrub(ex.getResponseBodyAsString()));
 			return List.of();
 		}
 

@@ -3,6 +3,7 @@ package com.idfinance.financial_transactions.client;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.service.ConditionalOnProviderConfigured;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import io.github.resilience4j.core.IntervalFunction;
@@ -14,7 +15,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -122,7 +122,7 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 			rows = this.client.get().uri(uriBuilder -> uriBuilder.path("/v2/currencies").build()).retrieve()
 					.body(Currency[].class);
 		} catch (RestClientException ex) {
-			log.warn("Could not list the currencies published by {}: {}", name(), ex.getMessage());
+			log.warn("Could not list the currencies published by {}: {}", name(), SafeLog.failure(ex));
 			return List.of();
 		}
 

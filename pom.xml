@@ -34,6 +34,8 @@
 		<spotbugs.version>4.10.4.1</spotbugs.version>
 		<!-- The annotations artifact uses a shorter version scheme than the plugin. -->
 		<spotbugs.annotations.version>4.10.4</spotbugs.annotations.version>
+		<!-- Not managed by the Boot parent. -->
+		<logbook.version>4.1.0</logbook.version>
 		<archunit.version>1.5.1</archunit.version>
 		<wiremock.version>3.13.2</wiremock.version>
 		<spotless.version>3.10.3</spotless.version>
@@ -50,6 +52,12 @@
 		<shedlock.version>7.9.0</shedlock.version>
 	</properties>
 	<dependencies>
+		<dependency>
+			<groupId>org.zalando</groupId>
+			<artifactId>logbook-spring-boot-starter</artifactId>
+			<version>${logbook.version}</version>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>

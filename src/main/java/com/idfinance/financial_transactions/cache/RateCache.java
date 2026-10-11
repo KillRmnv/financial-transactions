@@ -2,6 +2,7 @@ package com.idfinance.financial_transactions.cache;
 
 import com.idfinance.financial_transactions.config.RateCachePolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import java.time.LocalDate;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -57,10 +58,10 @@ public final class RateCache {
 			}
 			return Optional.of(this.objectMapper.readValue(cached, ExchangeRate.class));
 		} catch (RedisConnectionFailureException ex) {
-			log.warn("The rate cache is unreachable, falling back to the database: {}", ex.getMessage());
+			log.warn("The rate cache is unreachable, falling back to the database: {}", SafeLog.failure(ex));
 			return Optional.empty();
 		} catch (RuntimeException ex) {
-			log.warn("Discarding an unreadable rate cache entry for {} on {}: {}", pair, rateDate, ex.getMessage());
+			log.warn("Discarding an unreadable rate cache entry for {} on {}: {}", pair, rateDate, SafeLog.failure(ex));
 			evict(pair, rateDate);
 			return Optional.empty();
 		}
@@ -84,7 +85,7 @@ public final class RateCache {
 			this.redisTemplate.opsForValue().set(rateKey(pair, requestedDate, generationOf(pair)),
 					this.objectMapper.writeValueAsString(rate), this.policy.ttl());
 		} catch (RuntimeException ex) {
-			log.debug("Could not cache the {} rate for {} on {}: {}", pair, requestedDate, ex.getMessage());
+			log.debug("Could not cache the {} rate for {} on {}: {}", pair, requestedDate, SafeLog.failure(ex));
 		}
 	}
 
@@ -104,7 +105,7 @@ public final class RateCache {
 			this.redisTemplate.opsForValue().increment(generationKey(pair(baseCurrency, quoteCurrency)));
 		} catch (RuntimeException ex) {
 			log.debug("Could not invalidate the cached rates for {}: {}", pair(baseCurrency, quoteCurrency),
-					ex.getMessage());
+					SafeLog.failure(ex));
 		}
 	}
 
@@ -116,7 +117,7 @@ public final class RateCache {
 			this.redisTemplate.delete(rateKey(pair, rateDate, generationOf(pair)));
 		} catch (RuntimeException ex) {
 			log.debug("Could not drop the unreadable rate cache entry for {} on {}: {}", pair, rateDate,
-					ex.getMessage());
+					SafeLog.failure(ex));
 		}
 	}
 

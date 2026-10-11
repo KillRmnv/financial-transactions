@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.service;
 
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
 import java.util.List;
 import java.util.Locale;
@@ -50,7 +51,8 @@ public class CurrencyImporter {
 		try {
 			published = this.ratesProvider.publishedCurrencies();
 		} catch (RuntimeException ex) {
-			log.warn("Could not list the currencies published by {}: {}", this.ratesProvider.name(), ex.getMessage());
+			log.warn("Could not list the currencies published by {}: {}", this.ratesProvider.name(),
+					SafeLog.failure(ex));
 			return 0;
 		}
 

@@ -168,6 +168,33 @@ app:
       limit-refresh-period: 1s
       retry-after-seconds: 2
 
+# HTTP traffic is logged as metadata: method, path, status, duration, remote address
+# already masked. Request and response bodies are switched off entirely rather than
+# truncated — a body here is account numbers, amounts and currency, and a truncated
+# body is still a body.
+logbook:
+  strategy: default
+  write:
+    # Zero, and not a small number: a body here is an account number, a counterparty and
+    # an amount. The default is -1, which writes the whole of it, and turning the servlet
+    # body filter off does not stop it — the request body is already buffered by then and
+    # the sink formats what it is handed. Only this limit stops the body leaving.
+    max-body-size: 0
+  obfuscate:
+    replacement: "***"
+    headers:
+      - Authorization
+      - Proxy-Authorization
+      - Cookie
+      - Set-Cookie
+      - X-Api-Key
+    parameters:
+      - access_token
+      - apikey
+      - api_key
+      - token
+
+
 logging:
   level:
     com.idfinance.financial_transactions: INFO

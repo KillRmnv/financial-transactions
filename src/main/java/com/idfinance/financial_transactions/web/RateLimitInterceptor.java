@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.web;
 
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
@@ -77,8 +78,13 @@ final class RateLimitInterceptor implements HandlerInterceptor {
 		// caller is being
 		// throttled, and it names the quota that ran out rather than just the address.
 		this.metricsRecorder.rateLimitRefused(limits.quota());
+		// The address is masked: a throttled caller is nearly always one caller
+		// repeating
+		// itself, and there is a way to group those lines without writing down a way to
+		// find the person.
 		log.warn("Refused {} {} from {}: the {} quota of {} permits per {} is exhausted", request.getMethod(),
-				request.getRequestURI(), key, limits.quota(), quota.limitForPeriod(), quota.limitRefreshPeriod());
+				request.getRequestURI(), SafeLog.remoteAddress(request.getRemoteAddr()), limits.quota(),
+				quota.limitForPeriod(), quota.limitRefreshPeriod());
 		throw new RateLimitExceededException(key, quota.retryAfterSeconds());
 	}
 

@@ -7,6 +7,7 @@ import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.CurrencyPair;
 import com.idfinance.financial_transactions.entity.ScheduledJob;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyPairRepository;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
@@ -221,7 +222,7 @@ public class ScheduledRatesFetcher {
 			}
 			return new Fetched(code, rate);
 		} catch (RuntimeException ex) {
-			log.warn("Could not refresh {}/{} on {}: {}", code, quote, date, ex.getMessage());
+			log.warn("Could not refresh {}/{} on {}: {}", code, quote, date, SafeLog.failure(ex));
 			return null;
 		}
 	}

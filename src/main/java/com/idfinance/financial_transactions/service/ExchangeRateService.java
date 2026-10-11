@@ -5,6 +5,7 @@ import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.exception.AmountTooLargeException;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import java.math.BigDecimal;
@@ -169,7 +170,7 @@ public class ExchangeRateService {
 			return Optional.of(fetched);
 		} catch (RuntimeException ex) {
 			log.warn("Could not obtain the rate for {}/{} on {}: {}", currency.getCode(), ledger, rateDate,
-					ex.getMessage());
+					SafeLog.failure(ex));
 			return Optional.empty();
 		}
 	}

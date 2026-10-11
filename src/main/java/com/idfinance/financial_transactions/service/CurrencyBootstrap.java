@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.service;
 
+import com.idfinance.financial_transactions.logging.SafeLog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -54,7 +55,7 @@ public final class CurrencyBootstrap {
 			try {
 				this.currencyImporter.importPublished();
 			} catch (RuntimeException ex) {
-				log.warn("The startup currency import failed: {}", ex.getMessage());
+				log.warn("The startup currency import failed: {}", SafeLog.failure(ex));
 			}
 		});
 	}

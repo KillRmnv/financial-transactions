@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.exception;
 
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.web.RateLimitExceededException;
 import com.idfinance.financial_transactions.web.WireNames;
 import java.net.URI;
@@ -68,7 +69,7 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 
 	@ExceptionHandler(IllegalArgumentException.class)
 	ResponseEntity<ProblemDetail> handleIllegalArgument(IllegalArgumentException ex, WebRequest request) {
-		log.warn("Rejected a malformed request on {}: {}", request.getDescription(false), ex.getMessage());
+		log.warn("Rejected a malformed request on {}: {}", request.getDescription(false), SafeLog.failure(ex));
 		return problem(HttpStatus.BAD_REQUEST, "malformed-request", ex.getMessage(), request);
 	}
 
@@ -138,7 +139,7 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 	@Override
 	protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex,
 			HttpHeaders headers, HttpStatusCode status, WebRequest request) {
-		log.warn("Could not read the request body on {}: {}", request.getDescription(false), ex.getMessage());
+		log.warn("Could not read the request body on {}: {}", request.getDescription(false), SafeLog.failure(ex));
 
 		return ResponseEntity.badRequest()
 				.body(problemDetail(HttpStatus.BAD_REQUEST, "malformed-request", MALFORMED_BODY_DETAIL, request));
