@@ -11,6 +11,7 @@ import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.ExpenseLimit;
 import com.idfinance.financial_transactions.entity.ExpenseTransaction;
+import com.idfinance.financial_transactions.exception.AmountTooLargeException;
 import com.idfinance.financial_transactions.exception.NotFoundException;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
@@ -664,6 +665,26 @@ class ServiceLevelSteps {
 				.assertThatThrownBy(
 						() -> this.transactionService.accept(transaction("10.00", code, "product", "2022-01-05")))
 				.isInstanceOf(NotFoundException.class).hasMessageContaining(code);
+	}
+
+	/**
+	 * The product of a legal sum and a legal rate can still be past what the column
+	 * stores, and only a rate below ten keeps it inside. A stub publishes a rate of
+	 * ten and a sum at the accepted boundary, which the sum annotation allows and
+	 * the ledger column refuses.
+	 *
+	 * <p>
+	 * Provoked inside the assertion for the reason
+	 * {@code aTransactionInCurrencyIsRefused} gives: a scenario cannot catch a
+	 * throw.
+	 */
+	@Then("a transaction of {string} KZT at that rate is refused as too large")
+	void aTransactionAtThatRateIsRefused(String sum) {
+		Assertions
+				.assertThatThrownBy(
+						() -> this.transactionService.accept(transaction(sum, "KZT", "product", "2022-01-05")))
+				.as("a product past the ledger ceiling is refused rather than written")
+				.isInstanceOf(AmountTooLargeException.class).hasMessageContaining("ledger can store");
 	}
 
 	private TransactionRequest transaction(String sum, String currency, String category, String isoDate) {

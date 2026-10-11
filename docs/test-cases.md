@@ -4,7 +4,7 @@
 проверяется, какой техникой проектирования и в каком сценарии**. Чтобы найти тест-кейс, ищите
 объект или ситуацию в оглавлении ниже, а не по всему репозиторию.
 
-Сценариев в feature-файлах — **110**. Плюс JUnit вне Gherkin: правила архитектуры (раздел 13) и
+Сценариев в feature-файлах — **113**. Плюс JUnit вне Gherkin: правила архитектуры (раздел 13) и
 проверки контекста и изоляции (раздел 14).
 
 | Feature | Сценариев | Раздел |
@@ -13,7 +13,7 @@
 | `service/limit_flag_scenario` | 8 | 1.2 |
 | `service/concurrency` | 5 | 1.3 |
 | `rule/month_boundary` | 4 | 2 |
-| `service/conversion_boundaries` | 11 | 3.1 |
+| `service/conversion_boundaries` | 14 | 3.1 |
 | `api/client_api` | 16 | 3.2, 9, 10.2, 11 и один в 4 |
 | `api/rates_fallback` | 8 | 3.3 |
 | `service/currency_contract` | 7 | 4 |
@@ -23,7 +23,7 @@
 | `service/rate_cache` | 4 | 8 |
 | `api/request_validation` | 11 | 10.1 |
 | `quota/rate_limit` | 3 | 12 |
-| **Итого** | **110** | |
+| **Итого** | **113** | |
 
 ## Легенда техник
 
@@ -120,9 +120,9 @@ fallback.
 Объект: сумма в валюте учёта и цепочка получения курса. Две независимые вещи — арифметика округления и
 порядок поиска курса.
 
-### 3.1 Сервис: границы округления и цепочка поиска — 11 сценариев
+### 3.1 Сервис: границы округления и цепочка поиска — 14 сценариев
 
-`service/conversion_boundaries.feature`, 11 сценариев.
+`service/conversion_boundaries.feature`, 14 сценариев.
 
 | Тест-кейс | Техника | Сценарий |
 |---|---|---|
@@ -130,6 +130,9 @@ fallback.
 | Курс ≤ 0 не конвертирует ничего, 2 строки. Ноль сделал бы транзакцию бесплатной, отрицательный — перевёрнутой | **EP** | `A rate that is not positive cannot convert anything` |
 | Курс не округляется до умножения: `999.99 × 1.00000001` | **Регресс** | `The rate is not rounded before the amount is multiplied` |
 | Минимальный положительный курс `0.00000001` — меньше уже невозможно при scale 8 | **BVA** | `The smallest positive rate is still a rate` |
+| Произведение, которое колонка не вместит: сумма на границе × `10.00000001` → 400, а не падение на вставке. Граница одна на произведение, а не на сумму | **BVA** | `A product the ledger column cannot hold is refused, not written` |
+| Курс ровно 10 держит сумму на границе внутри колонки — ровно та величина, ради которой граница на цифру ниже потолка колонки | **BVA** | `A rate of exactly ten keeps a sum at the boundary inside the column` |
+| Курс меньше единицы границы не достигает никогда: сумма на границе уходит вниз | **BVA** | `A currency whose rate is below one cannot overflow at any legal sum` |
 | Курс берётся на первое число месяца, а не на дату транзакции | **ТЗ** | `The rate of the month's first day is used as it is` |
 | Курс за 3-е число не находится транзакцией от 5-го | **BVA** | `A later day of the same month is not the rate of this month` |
 | Месяц без своего курса берёт последний более ранний | **EP** | `A month with no rate of its own falls back to the most recent earlier one` |
@@ -316,8 +319,8 @@ HTTP-границе, и сценарий, вызывающий сервис на
 
 | Тест-кейс | Техника | Сценарий |
 |---|---|---|
-| Сумма, 10 строк: `0.00`, `0`, `0.01`, `0.99`, `100.00`, `999999999999.99`, `1000000000000.00`, `0.001`, `−0.01`, `−1000.00`. `@DecimalMin(inclusive = false)` и `@Digits(12,2)`: ноль отвергается, 12 цифр проходят, 13 — нет | **BVA** + **EP** | `The sum, by boundary and by equivalence class` |
-| Сумма лимита, те же 5 границ — отдельный DTO с теми же аннотациями | **BVA** | `The sum of a limit follows the same boundaries` |
+| Сумма, 11 строк: `0.00`, `0`, `0.01`, `0.001`, `0.00000001`, `0.000000001`, `100.00`, `99999999999.99`, `99999999999.99999999`, `999999999999.99`, `−0.01`, `−1000.00`. `@DecimalMin(inclusive = false)` и `@Digits(11, 8)`: ноль отвергается, 9 дробных цифр — нет, 11 целых проходят, 12 — нет | **BVA** + **EP** | `The sum, by boundary and by equivalence class` |
+| Сумма лимита, те же 7 границ — отдельный DTO с теми же аннотациями | **BVA** | `The sum of a limit follows the same boundaries` |
 | Счёт, 7 строк: 9 / 10 / 11 цифр, буквы, дефис, пробел, плюс | **BVA** + **EP** | `The account is exactly ten digits` |
 | Код валюты, 8 строк: 2 / 3 / 4 символа плюс `KZT1`, `U S`, `123`, `kzt` | **BVA** + **EP** | `The currency shortname is exactly three letters` |
 | Категория, 3 строки. `gold` даёт 404, а не 400: категория разбираема, её просто нет | **EP** | `The category is one of the two the lookup holds` |

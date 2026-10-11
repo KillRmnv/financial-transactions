@@ -63,6 +63,25 @@ Feature: The boundaries of converting into the ledger currency
     When a transaction of "100000000" KZT was posted on "2022-01-05"
     Then the transaction of "2022-01-05" totals "1.00" USD
 
+  Scenario: A product the ledger column cannot hold is refused, not written
+    Given the rate for "KZT" on "2022-01-01" is 10.00000001
+    # 99999999999.99999999 passes @Digits, and the product is past numeric(20, 8).
+    # Without a named refusal this is an insert that fails, which a caller reads as
+    # a constraint it does not know the name of, on a field that validated.
+    Then a transaction of "99999999999.99999999" KZT at that rate is refused as too large
+
+  Scenario: A rate of exactly ten keeps a sum at the boundary inside the column
+    Given the rate for "KZT" on "2022-01-01" is 10
+    When a transaction of "99999999999.99999999" KZT was posted on "2022-01-05"
+    Then the transaction of "2022-01-05" totals "999999999999.99999990" USD
+
+  Scenario: A currency whose rate is below one cannot overflow at any legal sum
+    # The bound is on the product, not on the sum, so it has to hold in the other
+    # direction too: a low-rate currency converts a sum at the ceiling downward.
+    Given the rate for "KZT" on "2022-01-01" is 0.00000001
+    When a transaction of "99999999999.99999999" KZT was posted on "2022-01-05"
+    Then the transaction of "2022-01-05" totals "1000.00000000" USD
+
   Scenario: The rate of the month's first day is used as it is
     Given the rate for "KZT" on "2022-01-01" is 0.5
     When a transaction of "100" KZT was posted on "2022-01-05"

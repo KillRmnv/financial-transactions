@@ -207,6 +207,11 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 			case NotFoundException ignored -> HttpStatus.NOT_FOUND;
 			case RateNotFoundException ignored -> HttpStatus.UNPROCESSABLE_ENTITY;
 			case ExternalServiceUnavailableException ignored -> HttpStatus.SERVICE_UNAVAILABLE;
+			// 400 rather than 422: the sum passed validation and the caller cannot
+			// predict the outcome in advance, because the rate that decided it came
+			// from a provider. The request cannot be processed as it stands, and it
+			// will not become processable by being sent again unchanged.
+			case AmountTooLargeException ignored -> HttpStatus.BAD_REQUEST;
 			// 503 and not 500: a contended row is the service being busy, and a 500 tells
 			// the caller
 			// the service is broken. The distinction decides whether a client retries.

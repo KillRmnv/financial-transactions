@@ -28,6 +28,64 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record LedgerPolicy(String currencyCode, int amountScale) {
 
 	/**
+	 * Integer digits an amount may carry, which is what {@code @Digits} refuses.
+	 *
+	 * <p>
+	 * The columns are {@code numeric(20, 8)} — twelve integer digits — so this is
+	 * deliberately one fewer than the column allows. The reason is the conversion
+	 * rather than the column: {@code ledger_sum} is {@code sum × close}, and the
+	 * rate is not always below one. GBP and EUR are quoted at more than a dollar,
+	 * so a sum at the column's own ceiling converts to a product past it and the
+	 * row is refused on write. Bounding the input below the column leaves room for
+	 * that product, and rejects 10^11 KZT — about 230 million dollars — only.
+	 *
+	 * <p>
+	 * The specification sets no limit on a sum. This is ours, and it is a storage
+	 * decision rather than a business rule; {@code docs/assumptions.md} records it
+	 * as one.
+	 */
+	public static final int MAX_AMOUNT_INTEGER_DIGITS = 11;
+
+	/**
+	 * Fraction digits an amount may carry, the same eight the columns store. This
+	 * is not a return of the two-decimal {@code @Digits} removed in
+	 * {@code 22db866}: 0.001 and 0.000061 are amounts, and rounding them to 0.00
+	 * before the write is what made the month's running total stop moving.
+	 */
+	public static final int MAX_AMOUNT_FRACTION_DIGITS = 8;
+
+	/**
+	 * The largest sum the API accepts: eleven integer digits and eight fraction
+	 * ones.
+	 */
+	public static final BigDecimal MAX_AMOUNT = new BigDecimal("99999999999.99999999");
+
+	/**
+	 * The largest converted total the ledger column holds, {@code numeric(20, 8)}:
+	 * twelve integer digits and eight fraction ones.
+	 */
+	private static final BigDecimal STORAGE_CEILING = new BigDecimal("999999999999.99999999");
+
+	/**
+	 * Whether an amount is too large to store once converted.
+	 *
+	 * <p>
+	 * The check the column itself cannot make and the schema cannot express: a
+	 * product of a legal sum and a rate the provider supplied is not guaranteed to
+	 * fit, because {@code close} is untrusted input and only a rate below ten keeps
+	 * it inside. Catching it here answers a 400 naming the field instead of letting
+	 * the row fail on insert, where the caller reads a constraint it does not know
+	 * about and cannot act on.
+	 *
+	 * @param amount
+	 *            the converted total, never null
+	 * @return whether its absolute value is past what the column stores
+	 */
+	public boolean exceedsStorageCeiling(BigDecimal amount) {
+		return amount.abs().compareTo(STORAGE_CEILING) > 0;
+	}
+
+	/**
 	 * @param currencyCode
 	 *            ISO 4217 code of the ledger currency, uppercase
 	 * @param amountScale

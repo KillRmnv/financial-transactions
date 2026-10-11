@@ -27,32 +27,34 @@ Feature: The boundaries of the request payload
     When a transaction of <sum> USD happened on "2022-01-05"
     Then the response is <status>
 
-    Examples: Boundaries of @DecimalMin(0.00, inclusive=false), then of the column the row lands in
-      | sum               | status | why                                        |
-      | "0.00"            | 400    | the minimum, excluded by inclusive=false   |
-      | "0"               | 400    | zero, written without decimals             |
-      | "0.01"            | 201    | the smallest sum the API accepts           |
-      | "0.001"           | 201    | three fraction digits, which is a scale a low-rate currency needs |
-      | "0.00000001"      | 201    | eight fraction digits, the storage scale   |
-      | "0.000000001"     | 400    | nine fraction digits, one past the column  |
-      | "100.00"          | 201    | an ordinary amount                         |
-      | "999999999999.99" | 201    | 12 integer digits, the storage maximum     |
-      | "1000000000000.00" | 400   | 13 integer digits, one past the column     |
-      | "-0.01"           | 400    | negative                                   |
-      | "-1000.00"        | 400    | a large negative                           |
+    Examples: Boundaries of @DecimalMin(0.00, inclusive=false), then of @Digits(11, 8)
+      | sum                 | status | why                                                    |
+      | "0.00"              | 400    | the minimum, excluded by inclusive=false               |
+      | "0"                 | 400    | zero, written without decimals                         |
+      | "0.01"              | 201    | the smallest sum the API accepts                       |
+      | "0.001"             | 201    | three fraction digits, which is a scale a low-rate currency needs |
+      | "0.00000001"        | 201    | eight fraction digits, the storage scale               |
+      | "0.000000001"       | 400    | nine fraction digits, one past the annotation           |
+      | "100.00"            | 201    | an ordinary amount                                     |
+      | "99999999999.99"    | 201    | 11 integer digits, the boundary                        |
+      | "99999999999.99999999" | 201 | exactly on the boundary, both halves at their maximum |
+      | "999999999999.99"   | 400    | 12 integer digits, one past the boundary               |
+      | "-0.01"             | 400    | negative                                               |
+      | "-1000.00"          | 400    | a large negative                                       |
 
   Scenario Outline: The sum of a limit follows the same boundaries
     When a limit of <sum> USD is requested on "2022-01-01"
     Then the response is <status>
 
     Examples:
-      | sum               | status |
-      | "0.00"            | 400    |
-      | "0.01"            | 201    |
-      | "0.001"           | 201    |
-      | "999999999999.99" | 201    |
-      | "1000000000000.00" | 400   |
-      | "-0.01"           | 400    |
+      | sum                 | status |
+      | "0.00"              | 400    |
+      | "0.01"              | 201    |
+      | "0.001"             | 201    |
+      | "99999999999.99"    | 201    |
+      | "99999999999.99999999" | 201 |
+      | "999999999999.99"   | 400    |
+      | "-0.01"             | 400    |
 
   Scenario Outline: The account is exactly ten digits
     When a transaction from account "<account>" of "10" USD happened on "2022-01-05"
@@ -156,7 +158,7 @@ Feature: The boundaries of the request payload
     Then the response is 415
 
   Scenario: A valid boundary value is stored, not merely accepted
-    When a transaction of "999999999999.99" USD happened on "2022-01-05"
+    When a transaction of "99999999999.99" USD happened on "2022-01-05"
     Then the response is 201
     And 1 transactions are stored
-    And the transaction of "2022-01-05" totals "999999999999.99" USD
+    And the transaction of "2022-01-05" totals "99999999999.99" USD

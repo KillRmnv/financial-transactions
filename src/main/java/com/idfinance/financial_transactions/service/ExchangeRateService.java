@@ -4,6 +4,7 @@ import com.idfinance.financial_transactions.cache.RateCache;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.entity.Currency;
+import com.idfinance.financial_transactions.exception.AmountTooLargeException;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRateRepository;
 import java.math.BigDecimal;
@@ -95,7 +96,26 @@ public class ExchangeRateService {
 		this.metricsRecorder.rateResolved(source, this.ratesProvider.name());
 		log.debug("Converting {} {} at {} (rate {} from {})", amount, currency.getCode(), effective, rate.rateDate(),
 				this.ratesProvider.name());
-		return new Conversion(amount.multiply(effective), effective, rate.rateDate());
+		return converted(amount, effective, rate.rateDate());
+	}
+
+	/**
+	 * Applies the rate and refuses a product the column cannot hold.
+	 *
+	 * <p>
+	 * The sum is bounded on input, but this is where the bound stops being enough:
+	 * the rate is not below one for every currency, so the product of a sum at the
+	 * ceiling can exceed what the column stores. Catching it here names the field
+	 * and answers 400; on the insert it would arrive as an unnamed constraint.
+	 */
+	private Conversion converted(BigDecimal amount, BigDecimal effective, LocalDate rateDate) {
+		BigDecimal sumInLedger = amount.multiply(effective);
+		if (this.ledgerPolicy.exceedsStorageCeiling(sumInLedger)) {
+			log.warn("A sum of {} at rate {} converts to {}, which the ledger cannot store", amount, effective,
+					sumInLedger);
+			throw new AmountTooLargeException(amount, sumInLedger);
+		}
+		return new Conversion(sumInLedger, effective, rateDate);
 	}
 
 	/**
