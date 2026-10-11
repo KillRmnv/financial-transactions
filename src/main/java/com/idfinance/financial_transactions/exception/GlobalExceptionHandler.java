@@ -235,12 +235,6 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 		return body;
 	}
 
-	/**
-	 * @param field
-	 *            the property that failed validation
-	 * @param message
-	 *            why it failed
-	 */
 	public record FieldViolation(String field, String message) {
 	}
 

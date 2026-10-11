@@ -69,8 +69,7 @@ public final class LimitController {
 			moment: there is no date in the body, which is what makes backdating impossible. A client
 			may install as many limits as it likes; only updating an existing one is forbidden.""")
 	@ApiResponse(responseCode = "201", description = "Installed")
-	@io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "application/json",
-			examples = @ExampleObject(name = "raiseTheJanuaryLimit", summary = "Raising the limit to 2000", value = "{\"accountFrom\":\"0000000123\",\"expenseCategory\":\"product\",\"sum\":2000.00}")))
+	@io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "application/json", examples = @ExampleObject(name = "raiseTheJanuaryLimit", summary = "Raising the limit to 2000", value = "{\"accountFrom\":\"0000000123\",\"expenseCategory\":\"product\",\"sum\":2000.00}")))
 	@ApiResponse(responseCode = "400", description = "The body failed validation", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "Unknown category", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
@@ -107,8 +106,7 @@ public final class LimitController {
 
 			@Parameter(description = "Narrow to one category. Omit for every category", example = "product") @RequestParam(name = "expense_category", required = false) String expenseCategory,
 
-			@Parameter(description = "First day of the month to report on. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01")
-			@RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
+			@Parameter(description = "First day of the month to report on. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01") @RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
 		return reportingService.limitsOf(accountFrom, expenseCategory, month).stream()
 				.map(row -> this.limitMapper.toResponse(accountFrom, row, this.ledgerPolicy)).toList();
 	}
@@ -129,8 +127,7 @@ public final class LimitController {
 
 			@Parameter(description = "Narrow to one category. Omit for every category", example = "product") @RequestParam(name = "expense_category", required = false) String expenseCategory,
 
-			@Parameter(description = "First day of the month to report. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01")
-			@RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
+			@Parameter(description = "First day of the month to report. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01") @RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
 		return reportingService.exceededInMonth(accountFrom, expenseCategory, month).stream().map(this::toResponse)
 				.toList();
 	}
