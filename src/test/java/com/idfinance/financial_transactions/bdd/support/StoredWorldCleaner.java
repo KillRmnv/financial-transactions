@@ -1,5 +1,6 @@
 package com.idfinance.financial_transactions.bdd.support;
 
+import com.idfinance.financial_transactions.SettableClock;
 import com.idfinance.financial_transactions.config.RateCachePolicy;
 import com.idfinance.financial_transactions.entity.CurrencyPair;
 import com.idfinance.financial_transactions.repository.CurrencyPairRepository;
@@ -8,6 +9,7 @@ import com.idfinance.financial_transactions.repository.ExpenseLimitRepository;
 import com.idfinance.financial_transactions.repository.ExpenseTransactionRepository;
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +29,14 @@ import org.springframework.stereotype.Component;
  * The cache is cleared by key prefix rather than by flushing the database,
  * because the prefix is what this service owns in a Redis that tests happen to
  * have to themselves.
+ *
+ * <p>
+ * The clock goes back to its starting instant too, and that is the fifth thing
+ * rather than a sixth table. It is a shared bean, and a scenario that moves it
+ * — installing a limit moves it — leaves it moved for the next one. A scenario
+ * about "the current month" therefore passed or failed depending on the
+ * scenario above it in the file, which is the same failure as the surviving
+ * cache: the world was not the one the next scenario expected to find.
  */
 @Component
 public class StoredWorldCleaner {
@@ -43,6 +53,8 @@ public class StoredWorldCleaner {
 
 	private final CurrencyPairRepository currencyPairRepository;
 
+	private final ObjectProvider<SettableClock> clock;
+
 	/**
 	 * The tracked set as the migration left it, captured on the first clean.
 	 */
@@ -51,13 +63,14 @@ public class StoredWorldCleaner {
 	public StoredWorldCleaner(ExpenseTransactionRepository expenseTransactionRepository,
 			ExpenseLimitRepository expenseLimitRepository, CurrencyRateRepository currencyRateRepository,
 			StringRedisTemplate redisTemplate, RateCachePolicy rateCachePolicy,
-			CurrencyPairRepository currencyPairRepository) {
+			CurrencyPairRepository currencyPairRepository, ObjectProvider<SettableClock> clock) {
 		this.expenseTransactionRepository = expenseTransactionRepository;
 		this.expenseLimitRepository = expenseLimitRepository;
 		this.currencyRateRepository = currencyRateRepository;
 		this.redisTemplate = redisTemplate;
 		this.rateCachePolicy = rateCachePolicy;
 		this.currencyPairRepository = currencyPairRepository;
+		this.clock = clock;
 	}
 
 	/**
@@ -80,6 +93,10 @@ public class StoredWorldCleaner {
 		this.currencyRateRepository.deleteAll();
 		cleanCurrencyPairs();
 		cleanCache();
+		// Only where there is one. The suites that stub rates in process and hold no
+		// BddInfrastructureConfiguration run on the system clock, which nothing moves,
+		// so there is nothing for them to leak into the next scenario.
+		this.clock.ifAvailable(SettableClock::reset);
 	}
 
 	/**
