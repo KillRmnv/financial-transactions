@@ -62,21 +62,24 @@ Feature: A rate the paid provider does not have
     And the transaction of "2022-01-03" is not flagged
 
   Scenario: The currency list is the paid provider's when it has one
-    Given the fallback publishes these currencies, including retired ones:
+    Given the fallback publishes these currencies:
       | code | name                 | retired |
       | USD  | United States Dollar | no      |
       | KZT  | Kazakhstani Tenge    | no      |
       | DEM  | German Mark          | yes     |
     Then the published currencies are "EUR" and "GBP"
 
-  Scenario: The fallback's list is used, with no retired codes in it, when the paid one has none
+  # The safety is not a filter. The endpoint carries an end_date on every row — it is
+  # the last day the provider holds data, not a withdrawal — so an adapter that dropped
+  # rows by that field discarded all 165 of them and the lookup stayed at the three
+  # seeded codes, with a log line reading "0 new codes of 0 published" rather than an
+  # error. Retired codes are absent from the answer instead, which is what the live
+  # endpoint does: DEM, FRF and RUR are simply not in it.
+  Scenario: Every row of the fallback's list is imported, end_date and all
     Given the paid provider publishes no currencies
-    And the fallback publishes these currencies, including retired ones:
+    And the fallback publishes these currencies:
       | code | name                 | retired |
       | USD  | United States Dollar | no      |
       | KZT  | Kazakhstani Tenge    | no      |
       | RUB  | Russian Ruble        | no      |
-      | DEM  | German Mark          | yes     |
-      | RUR  | Russian Ruble (1991) | yes     |
-      | TRL  | Turkish Lira (1922)  | yes     |
     Then the published currencies are "USD", "KZT" and "RUB"

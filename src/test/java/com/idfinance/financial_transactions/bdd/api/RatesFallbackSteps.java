@@ -173,21 +173,30 @@ class RatesFallbackSteps {
 				.contains(expectedPair.toLowerCase(Locale.ROOT));
 	}
 
-	@Given("the fallback publishes these currencies, including retired ones:")
+	/**
+	 * The currency list as the live endpoint sends it.
+	 *
+	 * <p>
+	 * Every row carries {@code end_date}, because the provider does: it is the last
+	 * day data is held for, not the day a currency was withdrawn. A stub that left
+	 * it off the current codes made the adapter's old filter — drop anything with
+	 * an {@code end_date} — look correct, and that filter discarded the whole live
+	 * list. A {@code retired} column therefore still says what the row is, but it
+	 * no longer decides whether the field is present.
+	 */
+	@Given("the fallback publishes these currencies:")
 	void theFallbackPublishes(DataTable table) {
 		List<String> rows = new ArrayList<>();
-		table.asMaps(String.class, String.class)
-				.forEach((row) -> rows.add("{\"iso_code\":\"%s\",\"name\":\"%s\",\"start_date\":\"1993-01-02\"%s}"
-						.formatted(row.get("code"), row.get("name"),
-								retired(row.get("retired")) ? ",\"end_date\":\"2002-02-28\"" : "")));
+		table.asMaps(String.class, String.class).forEach((row) -> rows.add(
+				"{\"iso_code\":\"%s\",\"name\":\"%s\",\"start_date\":\"1993-01-02\",\"end_date\":\"%s\"}".formatted(
+						row.get("code"), row.get("name"), retired(row.get("retired")) ? "2002-02-28" : "2026-10-10")));
 		this.ratesStub.stubCurrencies(rows);
 	}
 
 	/**
 	 * A Gherkin cell says yes or no, and {@code Boolean.parseBoolean} understands
 	 * neither: it answers false for "yes" as well as for "no", so a table written
-	 * with words marks nothing as retired — and the filtering under test then
-	 * passes against an adapter that imported the dead codes.
+	 * with words would mark every row as live and the scenario would not notice.
 	 */
 	private static boolean retired(String cell) {
 		return "yes".equalsIgnoreCase(cell.trim());

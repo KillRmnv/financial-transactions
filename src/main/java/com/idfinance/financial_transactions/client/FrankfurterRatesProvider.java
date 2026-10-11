@@ -30,30 +30,15 @@ import org.springframework.web.client.RestClientResponseException;
  * <li>{@code GET /v2/rate/{base}/{quote}?date=YYYY-MM-DD} — answers
  * {@code {"date","base","quote","rate"}}, one pair in the orientation asked for
  * </li>
- * <li>{@code GET /v2/currencies} — the list, filtered to codes that have not
- * been retired
+ * <li>{@code GET /v2/currencies} — the list, which carries only codes the
+ * provider still holds data for
  * </ul>
  *
  * <p>
- * Two things make it worth having alongside the paid provider rather than
- * instead of it. It needs no key and has no quotas at all — no daily cap, no
- * monthly cap — so it is both free and not worth paying to avoid. And it
- * answers a rate for <em>every</em> calendar day, weekends and public holidays
- * included: {@code close} for a Saturday came back as a real number, not a
- * null. That is why {@code previousClose} is always null here. The fallback in
- * {@link ExchangeRate#effectiveRate()} exists for a provider that has the gap,
- * and this one does not.
- *
- * <p>
- * History reaches back to 1948, which also means the free tier of the paid
- * provider — one year back — cannot be the only source for a transaction dated
- * further back than that.
- *
- * <p>
- * {@code publishedCurrencies} filters on {@code end_date}. The unfiltered list
- * carries about eighty retired codes — {@code DEM}, {@code FRF}, {@code TRL},
- * {@code RUR} — and importing them would add currencies to the lookup that no
- * longer exist.
+ * Retired codes are absent from that endpoint rather than filtered out of it.
+ * Checked against the live one: 165 rows, none of them {@code DEM},
+ * {@code FRF}, {@code TRL} or {@code RUR}, which is where the safety comes
+ * from.
  */
 @Component
 @ConditionalOnProviderConfigured("frankfurter")
@@ -145,8 +130,22 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 			return List.of();
 		}
 
-		return Arrays.stream(rows).filter(row -> row.isCurrent())
-				.map(row -> new RatesProvider.PublishedCurrency(row.isoCode(), row.displayName())).toList();
+		// No filter on end_date, and this is the second version of that decision. It
+		// was read as "the day the currency was withdrawn" and used to drop anything
+		// that carried one, on the theory that the list mixes in retired codes. Checked
+		// against the live endpoint: it carries end_date on every one of its 165 rows,
+		// with three distinct values, all within days of the request — so the field is
+		// the last day the provider holds data for, not a withdrawal, and the filter
+		// discarded the entire list. Nothing was imported and the log said zero of
+		// zero,
+		// which reads like a provider with nothing new rather than like a filter that
+		// ate everything.
+		//
+		// The retired codes are not in the answer to begin with. DEM, FRF, TRL and RUR
+		// are absent from the live response, which is where the safety actually came
+		// from; the filter was never doing the work it claimed.
+		return Arrays.stream(rows).map(row -> new RatesProvider.PublishedCurrency(row.isoCode(), row.displayName()))
+				.toList();
 	}
 
 	/**
@@ -200,12 +199,17 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 	 * same thing here, because the field is omitted in one response shape and sent
 	 * blank in the other.
 	 */
-	private record Currency(@JsonProperty("iso_code") String isoCode, @JsonProperty("name") String displayName,
-			@JsonProperty("end_date") String endDate) {
-
-		boolean isCurrent() {
-			return this.endDate == null || this.endDate.isBlank();
-		}
+	/**
+	 * One row of {@code /v2/currencies}.
+	 *
+	 * <p>
+	 * The endpoint also sends {@code start_date}, {@code end_date},
+	 * {@code iso_numeric} and {@code symbol}; none of them is read.
+	 * {@code end_date} in particular was read, on the belief that it said a
+	 * currency had been withdrawn, and is not: it is the last day the provider
+	 * holds data for, and it is present on every row.
+	 */
+	private record Currency(@JsonProperty("iso_code") String isoCode, @JsonProperty("name") String displayName) {
 
 	}
 

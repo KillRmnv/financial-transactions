@@ -226,16 +226,26 @@ public class WireMockRatesConfiguration {
 		}
 
 		/**
-		 * The currency list, with retired codes deliberately mixed in. The live list
-		 * carries about eighty of them — {@code DEM}, {@code FRF}, {@code RUR} — so the
-		 * filtering is the part worth stubbing: an adapter that imported them would add
-		 * currencies that no longer exist.
+		 * The currency list, in the shape the live endpoint actually sends.
+		 *
+		 * <p>
+		 * Every row carries {@code end_date}, and that is the point of the stub: the
+		 * adapter used to drop any row that had one, on the belief that it said the
+		 * currency had been withdrawn. It does not — it is the last day the provider
+		 * holds data for, and the live answer carries it on all 165 rows. The stub used
+		 * to leave it off the current codes, which made that filter look correct and
+		 * the import quietly return nothing against the real provider.
+		 *
+		 * <p>
+		 * Retired codes are simply not in the answer, which is also what the live
+		 * endpoint does: {@code DEM}, {@code FRF} and {@code RUR} are absent rather
+		 * than marked.
 		 */
 		public void frankfurterCurrencies(boolean withRetired) {
-			List<String> rows = new ArrayList<>(
-					List.of("{\"iso_code\":\"USD\",\"name\":\"United States Dollar\",\"start_date\":\"1948-06-21\"}",
-							"{\"iso_code\":\"KZT\",\"name\":\"Kazakhstani Tenge\",\"start_date\":\"1993-12-16\"}",
-							"{\"iso_code\":\"RUB\",\"name\":\"Russian Ruble\",\"start_date\":\"1998-01-02\"}"));
+			List<String> rows = new ArrayList<>(List.of(
+					"{\"iso_code\":\"USD\",\"name\":\"United States Dollar\",\"start_date\":\"1948-06-21\",\"end_date\":\"2026-10-10\"}",
+					"{\"iso_code\":\"KZT\",\"name\":\"Kazakhstani Tenge\",\"start_date\":\"1993-12-16\",\"end_date\":\"2026-10-10\"}",
+					"{\"iso_code\":\"RUB\",\"name\":\"Russian Ruble\",\"start_date\":\"1998-01-02\",\"end_date\":\"2026-10-10\"}"));
 			if (withRetired) {
 				rows.add(
 						"{\"iso_code\":\"DEM\",\"name\":\"German Mark\",\"start_date\":\"1948-06-21\",\"end_date\":\"2002-02-28\"}");
@@ -268,8 +278,9 @@ public class WireMockRatesConfiguration {
 
 		/**
 		 * The currency list, built from rows so a scenario can say exactly which codes
-		 * are present and which are retired. The live list mixes in about eighty dead
-		 * codes, so the filtering is the part worth controlling.
+		 * are present. The live answer carries {@code end_date} on every row and no
+		 * retired codes at all, so a scenario about a retired code is a scenario about
+		 * a row the provider does not send.
 		 */
 		public void stubCurrencies(List<String> rows) {
 			this.server.stubFor(WireMock.get(WireMock.urlPathEqualTo("/v2/currencies"))
