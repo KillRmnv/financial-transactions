@@ -18,19 +18,57 @@ which are personal and carry a token.
 
 ## PostgreSQL server
 
-Read-only on purpose: `default_transaction_read_only=on` and `statement_timeout=5000`. A writable
-agent connection to a development database is how a table disappears, so the guard belongs in the
-configuration rather than in the instructions.
-
-**An agent cannot change `currency_pair` through this server.** Changing which currencies are swept
-requires psql or a migration — see `changing-swept-currencies`.
-
-The `readonly` role must exist. `docker-compose.yml` seeds only the application role, so it was
-created by hand.
+Read-only on purpose, and enforced three times over: the `readonly` role has only `SELECT`,
+`PGOPTIONS` sets `default_transaction_read_only=on`, and the server runs every statement in
+`BEGIN READ ONLY`. A writable agent connection to a development database is how a table disappears,
+so the guard belongs in the configuration rather than in the instructions. **An agent cannot change
+`currency_pair` through this server** — that needs psql or a migration, see
+`changing-swept-currencies`.
 
 `@crystaldba/postgres-mcp` no longer exists on npm; the registry answers 404, and a command that
 cannot resolve fails as a server that "exited with code 1" rather than as a missing package. The
 replacement is `@contextflo/postgres-mcp`.
+
+### Two settings that look like they work and do not
+
+**The connection string must be a command argument, not `DATABASE_URL`.** The package reads
+`DATABASE_URL`, and run by hand it works that way — which is what makes it a trap. Under OpenCode the
+same configuration hangs at `pending` and never initialises, while the identical string as the last
+argument connects. Pass it in `command`:
+
+```json
+"command": ["npx", "-y", "@contextflo/postgres-mcp", "postgresql://readonly:readonly@localhost:5432/financial"]
+```
+
+**`statement_timeout` in `PGOPTIONS` is silently ignored.** The server runs every statement in its own
+`BEGIN READ ONLY` with its own timeout and overrides the session setting, so the configured 5000 ms
+never applies and `show statement_timeout` answers `30s` — the package default. The only thing that
+changes it is the flag:
+
+```json
+"command": ["npx", "-y", "@contextflo/postgres-mcp", "--statement-timeout", "5000", "postgresql://…"]
+```
+
+Verify both rather than trusting the file:
+
+```sql
+show statement_timeout;                              -- 5s, not 30s
+select current_user, current_setting('default_transaction_read_only');   -- readonly | on
+```
+
+### "Request timed out" is OpenCode's own limit, not the server's
+
+A local MCP server has a `timeout` option, and it defaults to **5000 ms**. `npx -y` on a cold npx cache
+downloads the package before the server answers, which takes longer than that, so the server fails
+with `Request timed out` — and works afterwards, from the cache, which is why it looks intermittent.
+Set it explicitly on every server started through `npx`:
+
+```json
+"postgres": { "type": "local", "command": ["npx", "-y", "…"], "enabled": true, "timeout": 30000 }
+```
+
+`opencode mcp list` prints `○ pending` for a server still initialising and `✓ connected` for one
+ready; a `pending` that never becomes `connected` is a hang, not slowness.
 
 ## GitHub server
 
@@ -48,6 +86,7 @@ a device-code flow that waits for a browser and looks like a hang.
 ## Commands
 
 ```bash
+opencode mcp list                 # ✓ connected / ○ pending / ✗ failed
 gh run list --branch master --limit 5
 gh run list --branch master --limit 1 --json databaseId --jq '.[0].databaseId'   # run id
 gh run view <id> --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
@@ -114,6 +153,8 @@ Checklist:
 - Say which branch, when it is not the current one.
 - For a CI question, ask for `gh run view --json jobs` before asking for logs: the jobs array
   distinguishes a parse error from a failing step, and it costs one call.
+- Diagnose an MCP problem from the config outwards, not by re-running the server. `opencode mcp list`
+  first, then the two SQL settings that say whether the guard is in force, then the file.
 
 ## Keeping the context small
 
