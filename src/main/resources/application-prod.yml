@@ -87,6 +87,18 @@ logging:
   level:
     com.idfinance.financial_transactions: INFO
     org.hibernate.SQL: WARN
+  # One JSON document per line, so "every 500 from the rates provider since the deploy"
+  # is a query in the aggregator rather than a grep across a file that has rotated.
+  #
+  # A property rather than a hand-written logback-spring.xml, and the reason is the bug
+  # this replaced: a <encoder class="…StructuredLogEncoder"/> with no <format> child is
+  # accepted by every test — none of them run under this profile — and then refuses to
+  # start the application in the one place that does. This property is read while the
+  # logging system initialises, which happens before the context does, so a misspelling
+  # fails on the first build that boots rather than on the deployment.
+  structured:
+    format:
+      console: logstash
 
 management:
   endpoint:
