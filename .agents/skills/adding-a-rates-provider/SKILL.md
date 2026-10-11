@@ -160,6 +160,11 @@ stub is wrong. To see what registered, the condition reports its outcome at star
   fallback is built by the adapter out of a second request over a window.
 - **Frankfurter answers `1 base = rate quote`**, so KZT→USD is a fraction of a dollar (0.0022),
   not 450. Test data has to respect the orientation or the flag fails rather than the provider.
+- **Frankfurter's `/v2/currencies` sends `end_date` on every row** — the last day it holds data for
+  a code, not the day a currency was withdrawn. An adapter that filters rows by `end_date` discards
+  the whole list and imports nothing; the log then reads "0 new codes of 0 published", which looks
+  like a provider with nothing new. Retired codes (DEM, FRF, TRL, RUR) are simply absent from that
+  endpoint — the safety comes from that, not from a filter.
 - **A stub reproduces the contract the code assumes**; only the live provider tests the contract
   the code got. Everything above was found against Twelve Data with a real key, and none of it was
   visible to the suite.

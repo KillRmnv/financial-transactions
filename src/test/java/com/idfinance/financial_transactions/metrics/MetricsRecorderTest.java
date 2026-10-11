@@ -62,9 +62,8 @@ class MetricsRecorderTest {
 	@Test
 	@DisplayName("uncalculated is counted as its own outcome, not folded into the others")
 	void uncalculatedIsNotAFlavourOfFalse() {
-		// The third outcome is the absence of an answer, and merging it with the other
-		// two would
-		// hide exactly the case an operator needs to see: rates stopped arriving.
+		// Absence of an answer rather than a flavour of false: an operator needs to see
+		// "rates stopped arriving" as its own number.
 		this.recorder.transactionAccepted("uncalculated");
 
 		assertThat(counter("financial.transactions.accepted", "outcome", "uncalculated")).isEqualTo(1.0d);
@@ -88,11 +87,7 @@ class MetricsRecorderTest {
 	@Test
 	@DisplayName("the provider tag is what makes a failover visible in the numbers")
 	void providerTagSeparatesAFailover() {
-		// Same source, different provider: without this tag a failover is invisible,
-		// and the numbers
-		// say only that external lookups went up. The total is unchanged by the
-		// failover, which is
-		// the point — the split is what moved.
+		// The total is unchanged by a failover; the split is what moved.
 		this.recorder.rateResolved("external", "twelvedata");
 		this.recorder.rateResolved("external", "frankfurter");
 
