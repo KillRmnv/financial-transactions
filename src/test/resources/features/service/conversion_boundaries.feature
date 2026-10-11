@@ -88,8 +88,21 @@ Feature: The boundaries of converting into the ledger currency
     Then the transaction of "2022-01-05" totals "50.00" USD
     And the rate used for "2022-01-05" is 0.5
 
-  Scenario: A later day of the same month is not the rate of this month
-    Given the rate for "KZT" on "2022-01-03" is 0.4
+  # The specification asks for "the exchange rate on the day of the expense, or the last
+  # closing rate". It used to be priced by the month's opening rate instead, which was a
+  # defensible reading — one rate per month, so the currency cannot cross a limit from under
+  # it — and was not what the document said.
+  Scenario: The rate used is the one for the day of the expense
+    Given the rate for "KZT" on "2022-01-05" is 0.4
+    When a transaction of "100" KZT was posted on "2022-01-05"
+    Then the transaction of "2022-01-05" totals "40.00" USD
+    And the rate used for "2022-01-05" is 0.4
+
+  # The other direction of the same rule, and the one it is easy to get wrong: a rate
+  # published after the day must not price it, even though it sits in the same month and
+  # is nearer on the calendar than anything earlier.
+  Scenario: A rate published after the day does not price it
+    Given the rate for "KZT" on "2022-01-07" is 0.4
     When a transaction of "100" KZT was posted on "2022-01-05"
     Then the transaction of "2022-01-05" is stored without a flag
 

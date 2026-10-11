@@ -10,9 +10,12 @@ Feature: Rates are cached in Redis in front of the database
 
   **A refresh is visible at once.** A cached answer outlives the row it came from until
   something says otherwise, and a cache that retires only the key it happens to know
-  about is wrong here in a way that looks right: the rate is stored under the first day
-  of the month, so the entry a transaction of the 5th reads and the entry a transaction
-  of the 6th reads are the same one, and it has to go when the rate changes.
+  about is wrong here in a way that looks right. It is worse now than it was: the rate
+  is stored under the first day of the month, but a transaction of the 5th asks about
+  the 5th and caches that, and a transaction of the 6th asks about the 6th and caches
+  that — two entries, both answering from a rate published on the 1st. Retiring the
+  entry for the day someone happened to convert on would leave the other one serving a
+  rate that no longer exists, which is the answer that looks most right of all.
 
   The refresh goes through the service rather than through SQL, because that is where
   the invalidation lives. A scenario that updated the row directly would be testing a
@@ -31,13 +34,30 @@ Feature: Rates are cached in Redis in front of the database
     Given the account "0000000123" and the category "product"
     And a limit of "1000" USD was installed on "2022-01-01"
 
+  # Two transactions on one day, because that is when a cache answers at all. Different
+  # days are different questions and get different entries — see below, where that is the
+  # subject rather than a detail.
   Scenario: A second conversion is answered without reading the table again
     Given the rate for "KZT" on "2022-01-01" is 0.0025
     When a transaction of "400" KZT was posted on "2022-01-05"
-    And a transaction of "400" KZT was posted on "2022-01-06"
-    Then the transaction of "2022-01-05" totals "1.00" USD
-    And the transaction of "2022-01-06" totals "1.00" USD
+    And a transaction of "400" KZT was posted on "2022-01-05"
+    Then 2 transactions are stored
+    And the month's total is "2.00" USD
     And the rate was resolved from the cache at least once
+
+  # The reason the cache carries a generation counter rather than deleting keys. Both
+  # entries answer from the rate of the 1st, they are stored under the days they were
+  # asked about, and one refresh of the 1st has to retire the pair: a cache that retired
+  # only what the sweeper last touched would keep serving the old rate to the 6th and
+  # report nothing wrong anywhere.
+  Scenario: One refresh retires every day cached under it
+    Given the rate for "KZT" on "2022-01-01" is 0.0025
+    When a transaction of "400" KZT was posted on "2022-01-05"
+    And a transaction of "400" KZT was posted on "2022-01-06"
+    And the rate for "KZT" on "2022-01-01" is refreshed to 0.0050
+    And a transaction of "400" KZT was posted on "2022-01-05"
+    Then the transaction of "2022-01-05" totals "1.00" USD
+    And the month's total is "4.00" USD
 
   Scenario: A refreshed rate is visible on the next lookup, not at the end of the TTL
     Given the rate for "KZT" on "2022-01-01" is 0.0025

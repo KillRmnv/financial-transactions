@@ -13,6 +13,7 @@ import com.idfinance.financial_transactions.entity.ExpenseTransaction;
 import com.idfinance.financial_transactions.exception.BatchResolutionFailedException;
 import com.idfinance.financial_transactions.exception.LockUnavailableException;
 import com.idfinance.financial_transactions.exception.NotFoundException;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import com.idfinance.financial_transactions.mapper.TransactionMapper;
 import com.idfinance.financial_transactions.metrics.MetricsRecorder;
 import com.idfinance.financial_transactions.repository.CurrencyRepository;
@@ -254,7 +255,11 @@ public class TransactionService {
 		transaction.assignWeight(this.limitPolicy.weightOf(category.getCode()));
 
 		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getAmount(), currency,
-				transaction.getOccurredMonth());
+				this.monthBoundary.dayOf(occurredAt));
+		// The rate is the one for the day of the expense, as the specification asks,
+		// and not the month's opening rate. The month is still what the flag is
+		// measured over — that is a separate question, and `occurredMonth` answers it
+		// rather than the rate.
 		if (!conversion.isAvailable()) {
 			log.warn("A transaction of {} {} has no available rate and will be stored without a flag",
 					transaction.getAmount(), currency.getCode());
@@ -308,8 +313,8 @@ public class TransactionService {
 		transaction.assignFlag(limit.getId(), exceeded);
 		this.metricsRecorder.transactionAccepted(exceeded ? FLAGGED : WITHIN_LIMIT);
 		log.info("Account {} spent {} of a {} {} limit this month by the {} rule; transaction {} exceeded",
-				limit.getAccountFrom(), spentBefore.add(transaction.getSumInLedger()), limit.getAmount(),
-				category.getCode(), this.limitPolicy.name(), exceeded);
+				SafeLog.account(limit.getAccountFrom()), spentBefore.add(transaction.getSumInLedger()),
+				limit.getAmount(), category.getCode(), this.limitPolicy.name(), exceeded);
 	}
 
 	/**
@@ -336,8 +341,8 @@ public class TransactionService {
 							"No limit exists for account %s and category %s even after the default was ensured"
 									.formatted(transaction.getAccountFrom(), category.getCode())));
 		} catch (CannotAcquireLockException ex) {
-			log.warn("Timed out waiting for the limit row of account {} and category {}", transaction.getAccountFrom(),
-					category.getCode());
+			log.warn("Timed out waiting for the limit row of account {} and category {}",
+					SafeLog.account(transaction.getAccountFrom()), category.getCode());
 			throw new LockUnavailableException(transaction.getAccountFrom(), category.getCode());
 		}
 	}
