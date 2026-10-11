@@ -11,8 +11,6 @@ import jakarta.validation.constraints.NotNull;
  * endpoint with a flag cannot be called with the wrong verb by accident, and an
  * idempotent retry is still a success rather than a conflict.
  *
- * @param active
- *            true to start sweeping the currency daily, false to stop
  */
 public record CurrencyPairRequest(@NotNull Boolean active) {
 }

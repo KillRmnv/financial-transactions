@@ -70,11 +70,6 @@ final class RateLimitInterceptor implements HandlerInterceptor {
 		String key = bucketKey(request);
 		RateLimiter limiter = this.limiters.computeIfAbsent(key, limiterKey -> build(limiterKey, quota));
 
-		// With a zero timeout this asks for one permit and gives up at once: a refused
-		// request has to be
-		// refused now, because a client told to wait needs an answer with a
-		// Retry-After, not a thread held
-		// open until a permit frees up.
 		if (limiter.acquirePermission()) {
 			return true;
 		}

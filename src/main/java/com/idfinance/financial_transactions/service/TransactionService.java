@@ -103,9 +103,6 @@ public class TransactionService {
 	private final RateTimeouts rateTimeouts;
 
 	/**
-	 * Accepts one transaction.
-	 *
-	 * <p>
 	 * The category and currency codes travel with the result because the web layer
 	 * must not reach into the repository to resolve them.
 	 */
@@ -142,10 +139,6 @@ public class TransactionService {
 	 * that is not about rates — an unknown currency, a constraint — aborts the
 	 * batch, because by then earlier transactions are already stored and reporting
 	 * a uniform failure for a partially written batch would be a lie.
-	 *
-	 * @param requests
-	 *            the batch, validated as a whole by the caller
-	 * @return one result per request, in the order they were sent
 	 */
 	public List<AcceptedTransaction> acceptBatch(List<TransactionRequest> requests) {
 		if (requests.isEmpty()) {
@@ -155,9 +148,6 @@ public class TransactionService {
 	}
 
 	/**
-	 * The rate phase: one virtual thread per transaction.
-	 *
-	 * <p>
 	 * A virtual thread per task rather than a fixed pool because the batch size is
 	 * the caller's decision and a pool would have to guess it — the same reason the
 	 * daily sweep works this way.
@@ -213,24 +203,17 @@ public class TransactionService {
 	}
 
 	/**
-	 * The store phase, in a transaction of its own because the caller of a batch
-	 * holds none.
+	 * In a transaction of its own because the caller of a batch holds none.
 	 */
 	private AcceptedTransaction storeInItsOwnTransaction(Prepared prepared) {
 		return this.transactionTemplate.execute(status -> store(prepared));
 	}
 
 	/**
-	 * Everything the store phase needs, already resolved.
-	 *
-	 * <p>
 	 * The row is detached by the time it is stored, which is why the codes travel
 	 * with it rather than being resolved again on the far side of the phase
 	 * boundary.
 	 *
-	 * @param transaction
-	 *            the mapped row, with its conversion recorded when a rate was
-	 *            available
 	 * @param category
 	 *            the flag is decided per category, so the store phase still needs
 	 *            it
@@ -248,9 +231,7 @@ public class TransactionService {
 	 * client.
 	 */
 	private Prepared prepare(TransactionRequest request, Currency currency, ExpenseCategory category) {
-		// The instant and its month are the server's reading of the timestamp, in the
-		// one configured
-		// timezone, not the client's assertion about either.
+
 		Instant occurredAt = request.datetime().toInstant();
 		ExpenseTransaction transaction = this.transactionMapper.toEntity(request, currency, category.getId(),
 				occurredAt, this.monthBoundary.monthOf(occurredAt));
@@ -258,14 +239,6 @@ public class TransactionService {
 		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getAmount(), currency,
 				transaction.getOccurredMonth());
 		if (!conversion.isAvailable()) {
-			// No rate anywhere. The transaction is still stored, so nothing is lost, but
-			// the flag stays
-			// uncalculated rather than being invented. Such rows are recalculated once the
-			// rate appears.
-			// No flag is assigned and flag_calculated is derived from limit_exceeded, so
-			// the row
-			// stores itself as uncalculated: there is no method to call here and none to
-			// forget.
 			log.warn("A transaction of {} {} has no available rate and will be stored without a flag",
 					transaction.getAmount(), currency.getCode());
 			this.metricsRecorder.transactionAccepted(UNCALCULATED);

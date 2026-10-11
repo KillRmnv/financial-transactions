@@ -32,39 +32,18 @@ public final class LimitFlagRule {
 	private LimitFlagRule() {
 	}
 
-	/**
-	 * @param spentSoFar
-	 *            this month's total before the transaction being judged,in ledger
-	 *            currency
-	 * @param amount
-	 *            the transaction amount in ledger currency
-	 * @param limit
-	 *            the limit in effect,in ledger currency
-	 * @return whether the transaction exceeds it
-	 */
 	public static boolean isExceeded(BigDecimal spentSoFar, BigDecimal amount, BigDecimal limit) {
 		return spentSoFar.add(amount).compareTo(limit) > 0;
 	}
 
-	/**
-	 * @param limits
-	 *            every limit installed for the client and category, in any order
-	 * @param transactionDate
-	 *            the day the transaction happened
-	 * @return the applicable limit, or null when the client never installed one
-	 */
 	public static BigDecimal limitInEffect(List<LimitOn> limits, LocalDate transactionDate) {
 		return limits.stream().filter(limit -> !limit.installedOn().isAfter(transactionDate))
 				.max(Comparator.comparing(LimitOn::installedOn)).map(LimitOn::amount).orElse(null);
 	}
 
 	/**
-	 * A limit and the day it was installed.
-	 *
 	 * @param installedOn
 	 *            the installation date, always "now" in this service
-	 * @param amount
-	 *            the limit in ledger currency
 	 */
 	public record LimitOn(LocalDate installedOn, BigDecimal amount) {
 	}

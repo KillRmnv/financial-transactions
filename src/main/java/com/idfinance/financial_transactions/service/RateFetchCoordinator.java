@@ -50,15 +50,6 @@ public final class RateFetchCoordinator {
 	 * Runs {@code fetch} unless an identical fetch is already running, in which
 	 * case waits for that one.
 	 *
-	 * @param baseCurrency
-	 *            currency of the transaction
-	 * @param quoteCurrency
-	 *            the ledger currency, since the table stores no quote and the
-	 *            provider is asked for one
-	 * @param date
-	 *            the day the rate is for
-	 * @param fetch
-	 *            the call to coalesce; runs on whichever thread got there first
 	 * @return what the single call returned, or an empty conversion when there is
 	 *         no rate
 	 */

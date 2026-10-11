@@ -44,13 +44,6 @@ public final class RateCache {
 	 * <p>
 	 * Called with the day that was asked for, which is not necessarily the day the
 	 * rate describes — see the class comment.
-	 *
-	 * @param baseCurrency
-	 *            currency of the transaction
-	 * @param quoteCurrency
-	 *            the ledger currency
-	 * @param rateDate
-	 *            the day the caller wants a rate for
 	 */
 	public Optional<ExchangeRate> get(String baseCurrency, String quoteCurrency, LocalDate rateDate) {
 		if (!this.policy.enabled()) {

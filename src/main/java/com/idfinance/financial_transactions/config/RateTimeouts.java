@@ -20,10 +20,6 @@ import org.springframework.stereotype.Component;
  * that names the two candidates. One bean carrying both values cannot be
  * injected the wrong way round.
  *
- * @param batch
- *            for a batch of transactions, whose rate lookups run concurrently
- * @param sweep
- *            for one currency during the daily sweep
  */
 @Component
 public record RateTimeouts(RateTimeouts.Rates rates) {
@@ -33,16 +29,6 @@ public record RateTimeouts(RateTimeouts.Rates rates) {
 	 * settings, and a second constructor argument that exists only to be
 	 * dereferenced is noise.
 	 *
-	 * @param connectTimeout
-	 *            how long the provider may take to accept the connection
-	 * @param readTimeout
-	 *            how long it may take to answer
-	 * @param attempts
-	 *            total attempts, at least one
-	 * @param retryBackoff
-	 *            pause between attempts
-	 * @param fallbackDays
-	 *            how far to look in the past
 	 */
 	public record Rates(Duration connectTimeout, Duration readTimeout, int attempts, Duration retryBackoff,
 			int fallbackDays) {

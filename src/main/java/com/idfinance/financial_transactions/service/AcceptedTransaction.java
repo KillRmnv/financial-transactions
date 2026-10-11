@@ -11,12 +11,6 @@ import com.idfinance.financial_transactions.entity.ExpenseTransaction;
  * a controller is what the architecture tests forbid, and it would mean
  * resolving the same row twice for one request.
  *
- * @param transaction
- *            the saved transaction
- * @param expenseCategory
- *            the category as the client spelled it
- * @param currencyCode
- *            the verified currency code
  */
 public record AcceptedTransaction(ExpenseTransaction transaction, String expenseCategory, String currencyCode) {
 }

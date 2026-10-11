@@ -346,9 +346,6 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * whole answer, and pulling the rest in would put a second unmapped copy of the
 	 * instrument on the record.
 	 *
-	 * @param data
-	 *            the instruments matching the search, in no order the service
-	 *            relies on
 	 */
 	record SymbolSearchResponse(List<Symbol> data) {
 
@@ -364,20 +361,9 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * Only the fields the specification needs are mapped. The endpoint answers more
 	 * than this, and letting the rest in would put a second, unmapped version of
 	 * the same rate on the record.
-	 *
-	 * @param values
-	 *            one entry per day
 	 */
 	record TimeSeriesResponse(List<Value> values) {
 
-		/**
-		 * @param close
-		 *            the close of that day
-		 * @param previousClose
-		 *            the last close before it, the fallback the specification asks for
-		 *            on weekends and holidays; spelled {@code previous_close} on the
-		 *            wire and camel cased here
-		 */
 		record Value(LocalDate datetime, BigDecimal close, @JsonProperty("previous_close") BigDecimal previousClose) {
 		}
 

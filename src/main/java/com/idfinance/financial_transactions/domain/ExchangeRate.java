@@ -10,14 +10,8 @@ import java.time.LocalDate;
  * {@code close} and {@code previous_close}.
  *
  *
- * @param baseCurrency
- *            currency of the transaction
  * @param quoteCurrency
  *            the ledger currency, from {@code app.ledger.currency-code}
- * @param rateDate
- *            the day this rate describes
- * @param close
- *            closing rate of the day
  * @param previousClose
  *            the last known close, used when the day has no close of its own
  * @param source
