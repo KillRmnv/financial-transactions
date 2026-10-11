@@ -94,6 +94,45 @@ Feature: The client-facing API over HTTP
     And the limit for "product" is the automatic fallback
     And the limit for "service" is the automatic fallback
 
+  # The whole loop in one scenario, because every other limits scenario inspects the
+  # report against limits that were installed first. This one starts from a transaction
+  # and checks that the account it lands on is then described as having spent it — which
+  # is what a client actually does, and what nothing proved.
+  Scenario: A transaction is reported as spent against the limit of its category
+    Given a limit of "1000" USD was installed on "2022-01-01"
+    And a transaction of "600" USD happened on "2022-01-05"
+    And a transaction of "900" USD happened on "2022-01-06"
+    When the limits of the account are requested for the month "2022-01"
+    Then the limit for "product" reports "1500" spent and "-500" remaining
+    And the limit for "product" is not the automatic fallback
+    And the response holds 2 exceeded transactions
+
+  # A category nothing was installed for gets its standing limit the moment a
+  # transaction needs one, so the report has to show it as spent against a default it
+  # has never seen a row for.
+  Scenario: A transaction into a category with no limit is measured against the standing one
+    Given the account "0000000470" and the category "service"
+    And a transaction of "1500" USD happened on "2022-01-05"
+    When the limits of the account are requested for the category "service" and the month "2022-01"
+    Then the limit for "service" is the automatic fallback
+    And the limit for "service" reports "1500" spent and "-500" remaining
+    And the response holds 1 exceeded transactions
+
+  # The month is a parameter because transactions carry the date they were made, and
+  # those dates are in the past. Asked without it, this account's full January reads as
+  # a month with nothing spent in it — which is the answer a running service gives, and
+  # the reason the report looked broken rather than empty.
+  Scenario: Asking about a month reports that month, not the current one
+    Given the service clock is at "2026-06-01"
+    And the account "0000000471" and the category "product"
+    And a transaction of "400" USD happened on "2022-01-05"
+    When the limits of the account are requested
+    Then the limit for "product" reports "0" spent and "1000" remaining
+    When the limits of the account are requested for the month "2022-01"
+    Then the limit for "product" reports "400" spent and "600" remaining
+    When the limits of the account are requested for the month "2022-02"
+    Then the limit for "product" reports "0" spent and "1000" remaining
+
   # The filter is the same question asked about one category rather than both.
   Scenario: A category can be asked for on its own
     Given a limit of "2000" USD was installed on "2022-01-01"

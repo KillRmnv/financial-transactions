@@ -86,21 +86,28 @@ public final class LimitController {
 	}
 
 	@Operation(summary = "List the limits of an account", description = """
-			Returns every limit of the account, each with what has been spent against it in the current month.
+			Returns every limit of the account, each with what has been spent against it in the reported month.
 
 			`expense_category` narrows the report to one category. Both categories are always answered:
 			a category nobody has installed a limit for is reported as the automatic 1000 USD fallback, with
 			`limitDatetime` null and `limitDefault` true, because the specification keeps a limit per
 			category and takes an unset one as 1000 — whether or not the account has ever spent on it. An
-			omitted category from the list would read as "no limit applies there".""")
+			omitted category from the list would read as "no limit applies there".
+
+			`month` is the month the spending is reported for, and defaults to the current one. It exists
+			because transactions are accepted with the date they were made, and those dates are in the past:
+			ask without it about an account whose transactions are all from January 2022 and the answer will
+			be zero spent for the month this is being read in, however full that other month was.""")
 	@ApiResponse(responseCode = "200", description = "The limits, newest first")
 	@ApiResponse(responseCode = "404", description = "The category is not one of `product` or `service`", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@GetMapping("/limits")
 	List<LimitResponse> findAll(
 			@Parameter(description = "The account to list limits for", example = "0000000123") @RequestParam("account_from") String accountFrom,
 
-			@Parameter(description = "Narrow to one category. Omit for every category", example = "product") @RequestParam(name = "expense_category", required = false) String expenseCategory) {
-		return reportingService.limitsOf(accountFrom, expenseCategory).stream()
+			@Parameter(description = "Narrow to one category. Omit for every category", example = "product") @RequestParam(name = "expense_category", required = false) String expenseCategory,
+
+			@Parameter(description = "First day of the month to report on. Defaults to the current month; any day of the month is accepted and normalised", example = "2022-01-01") @RequestParam(name = "month", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate month) {
+		return reportingService.limitsOf(accountFrom, expenseCategory, month).stream()
 				.map(row -> this.limitMapper.toResponse(accountFrom, row, this.ledgerPolicy)).toList();
 	}
 

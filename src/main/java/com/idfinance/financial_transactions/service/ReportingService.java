@@ -67,13 +67,15 @@ public class ReportingService {
 	/**
 	 * @param categoryCode
 	 *            narrows the report to one category, or null for every category
+	 * @param month
+	 *            the month whose spending is reported, or null for the current one
 	 * @throws NotFoundException
 	 *             if the category is not one the lookup holds
 	 */
 	@Transactional(readOnly = true)
-	public List<LimitRow> limitsOf(String accountFrom, String categoryCode) {
+	public List<LimitRow> limitsOf(String accountFrom, String categoryCode, LocalDate month) {
 		checkCategory(categoryCode);
-		return reportOf(accountFrom, categoryCode);
+		return reportOf(accountFrom, categoryCode, month);
 	}
 
 	/**
@@ -84,11 +86,21 @@ public class ReportingService {
 	 * The category goes into the query rather than being filtered over the result:
 	 * the report is ordered by installation date, so narrowing in memory would keep
 	 * the ordering of the whole set only to throw most of it away.
+	 *
+	 * <p>
+	 * The month is a parameter and not {@link #currentMonth()} baked in, because
+	 * this service accepts transactions dated in the past — the specification's own
+	 * scenarios are January 2022 — and a client asking what it has spent in that
+	 * month had no way to say so. It was answered about the current month instead,
+	 * which reports a spent amount of zero for a full and flagged transaction
+	 * history, and reads as though the transaction had never been stored. The suite
+	 * never saw it: every scenario moves the clock to its own dates, so "this
+	 * month" and the month being reported are the same thing there.
 	 */
-	private List<LimitRow> reportOf(String accountFrom, String categoryCode) {
-		LocalDate month = currentMonth();
-		return this.expenseLimitRepository.reportForAccount(accountFrom, month, categoryCode, this.defaultLimitSum,
-				this.ledgerPolicy.currencyCode()).stream().map(this::toRow).toList();
+	private List<LimitRow> reportOf(String accountFrom, String categoryCode, LocalDate month) {
+		LocalDate effectiveMonth = (month != null) ? month.withDayOfMonth(1) : currentMonth();
+		return this.expenseLimitRepository.reportForAccount(accountFrom, effectiveMonth, categoryCode,
+				this.defaultLimitSum, this.ledgerPolicy.currencyCode()).stream().map(this::toRow).toList();
 	}
 
 	/**
@@ -108,7 +120,7 @@ public class ReportingService {
 	 */
 	@Transactional(readOnly = true)
 	public Optional<LimitRow> limitRowOf(String accountFrom, Long limitId) {
-		return reportOf(accountFrom, null).stream().filter(row -> Objects.equals(row.id(), limitId)).findFirst();
+		return reportOf(accountFrom, null, null).stream().filter(row -> Objects.equals(row.id(), limitId)).findFirst();
 	}
 
 	/**

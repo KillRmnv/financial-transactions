@@ -126,6 +126,23 @@ class ApiSteps {
 				.isEqualTo(category);
 	}
 
+	/**
+	 * Moves the service clock without installing anything.
+	 *
+	 * <p>
+	 * Installing a limit moves it too, which is why there was no direct step until
+	 * a scenario needed one: "ask about the current month" cannot be asserted by a
+	 * scenario that set up its own dates, because the setup is what moved the
+	 * clock. The clock is a shared bean, so a scenario that says nothing about time
+	 * inherits whatever the one before it left behind — this is how a scenario
+	 * about the default month can pass or fail depending on its position in the
+	 * file.
+	 */
+	@Given("the service clock is at {string}")
+	void theServiceClockIsAt(String isoDate) {
+		this.clock.set(LocalDate.parse(isoDate).atStartOfDay().toInstant(ZoneOffset.UTC));
+	}
+
 	@When(value = "a transaction of {string} USD happened on {string}")
 	void aTransactionHappened(String sum, String isoDate) {
 		this.postTransaction(sum, "USD", this.category, isoDate);
@@ -323,12 +340,22 @@ class ApiSteps {
 
 	@When("the limits of the account are requested")
 	void theLimitsAreRequested() {
-		theLimitsOfAreRequested(null);
+		theLimitsOfAreRequested(null, null);
+	}
+
+	@When("the limits of the account are requested for the month {string}")
+	void theLimitsForMonthAreRequested(String yearMonth) {
+		theLimitsOfAreRequested(null, yearMonth + "-01");
+	}
+
+	@When("the limits of the account are requested for the category {string} and the month {string}")
+	void theLimitsForCategoryAndMonthAreRequested(String category, String yearMonth) {
+		theLimitsOfAreRequested(category, yearMonth + "-01");
 	}
 
 	@When("the limits of the account are requested for the category {string}")
 	void theLimitsOfCategoryAreRequested(String category) {
-		theLimitsOfAreRequested(category);
+		theLimitsOfAreRequested(category, null);
 	}
 
 	/**
@@ -341,7 +368,7 @@ class ApiSteps {
 		String previous = this.accountFrom;
 		this.accountFrom = account;
 		try {
-			theLimitsOfAreRequested(null);
+			theLimitsOfAreRequested(null, null);
 		} finally {
 			this.accountFrom = previous;
 		}
@@ -352,9 +379,10 @@ class ApiSteps {
 	 * into different requests: a scenario comparing them is comparing the filter
 	 * and nothing else.
 	 */
-	private void theLimitsOfAreRequested(String category) {
+	private void theLimitsOfAreRequested(String category, String month) {
 		String uri = "/api/v1/limits?account_from=" + this.accountFrom
-				+ ((category == null) ? "" : "&expense_category=" + category);
+				+ ((category == null) ? "" : "&expense_category=" + category)
+				+ ((month == null) ? "" : "&month=" + month);
 		this.response = exchange(this.client().get().uri(uri));
 		this.responseBody = readBody();
 	}
