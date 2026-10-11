@@ -2,7 +2,6 @@ package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
-import com.idfinance.financial_transactions.domain.ExchangeRate;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
