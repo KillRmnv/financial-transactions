@@ -2,6 +2,8 @@ package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.config.RateTimeouts;
+import com.idfinance.financial_transactions.domain.LimitContext;
+import com.idfinance.financial_transactions.domain.LimitPolicy;
 import com.idfinance.financial_transactions.domain.MonthBoundary;
 import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.entity.Currency;
@@ -101,6 +103,17 @@ public class TransactionService {
 	 * would otherwise hold the request thread indefinitely.
 	 */
 	private final RateTimeouts rateTimeouts;
+
+	/**
+	 * Which rule measures a limit, and what a transaction counts as.
+	 *
+	 * <p>
+	 * Injected rather than called statically because the comparison used to exist
+	 * here as well as in {@code domain}, and the copy here was the one that ran:
+	 * the rule the specification's truth table is written against could be changed
+	 * in the tests without the service noticing.
+	 */
+	private final LimitPolicy limitPolicy;
 
 	/**
 	 * The category and currency codes travel with the result because the web layer
@@ -235,6 +248,10 @@ public class TransactionService {
 		Instant occurredAt = request.datetime().toInstant();
 		ExpenseTransaction transaction = this.transactionMapper.toEntity(request, currency, category.getId(),
 				occurredAt, this.monthBoundary.monthOf(occurredAt));
+		// Set here rather than beside the flag, because the flag is only computed when
+		// a rate was found and the weight belongs to every stored row: a transaction
+		// accepted with no rate still counts towards the month the next one reads.
+		transaction.assignWeight(this.limitPolicy.weightOf(category.getCode()));
 
 		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getAmount(), currency,
 				transaction.getOccurredMonth());
@@ -283,15 +300,16 @@ public class TransactionService {
 		ensureLimitExists(transaction, category);
 		ExpenseLimit limit = lockEffectiveLimit(transaction, category);
 
-		BigDecimal spentBefore = this.expenseTransactionRepository.sumInLedgerForMonth(transaction.getAccountFrom(),
+		BigDecimal spentBefore = this.expenseTransactionRepository.spentInLedgerForMonth(transaction.getAccountFrom(),
 				category.getId(), transaction.getOccurredMonth());
-		BigDecimal runningTotal = spentBefore.add(transaction.getSumInLedger());
-		boolean exceeded = runningTotal.compareTo(limit.getAmount()) > 0;
+		boolean exceeded = this.limitPolicy.isExceeded(new LimitContext(spentBefore, transaction.getSumInLedger(),
+				limit.getAmount(), transaction.getAccountFrom(), category.getCode()));
 
 		transaction.assignFlag(limit.getId(), exceeded);
 		this.metricsRecorder.transactionAccepted(exceeded ? FLAGGED : WITHIN_LIMIT);
-		log.info("Account {} spent {} of a {} {} limit this month; transaction {} exceeded", limit.getAccountFrom(),
-				runningTotal, limit.getAmount(), category.getCode(), exceeded);
+		log.info("Account {} spent {} of a {} {} limit this month by the {} rule; transaction {} exceeded",
+				limit.getAccountFrom(), spentBefore.add(transaction.getSumInLedger()), limit.getAmount(),
+				category.getCode(), this.limitPolicy.name(), exceeded);
 	}
 
 	/**

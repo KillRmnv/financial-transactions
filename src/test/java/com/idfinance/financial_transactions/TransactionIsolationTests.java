@@ -151,11 +151,11 @@ class TransactionIsolationTests {
 	 *
 	 * <p>
 	 * This is the other half of the same property, and it is the one that would
-	 * bite the running total: {@code sumInLedgerForMonth} reads {@code ledger_sum}
-	 * while another transaction is in the middle of recalculating it. Reading the
-	 * old value is correct behaviour under this isolation level; reading a
-	 * half-written one is not something a database can produce, and this is what
-	 * says so.
+	 * bite the running total: {@code spentInLedgerForMonth} reads
+	 * {@code ledger_sum} while another transaction is in the middle of
+	 * recalculating it. Reading the old value is correct behaviour under this
+	 * isolation level; reading a half-written one is not something a database can
+	 * produce, and this is what says so.
 	 */
 	@Test
 	void anUncommittedUpdateIsInvisible() throws Exception {

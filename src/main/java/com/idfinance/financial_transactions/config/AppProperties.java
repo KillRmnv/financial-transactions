@@ -18,9 +18,64 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *            hour of the daily refresh, in {@code monthTimezone}
  * @param rates
  *            settings shared by every provider, and the providers themselves
+ * @param limits
+ *            which rule measures the month, and what each category counts as
+ *            against its limit
  */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(BigDecimal defaultLimitSum, ZoneId monthTimezone, int scheduledFetchHour, Rates rates) {
+public record AppProperties(BigDecimal defaultLimitSum, ZoneId monthTimezone, int scheduledFetchHour, Rates rates,
+		Limits limits) {
+
+	/**
+	 * Which rule measures a limit, and the weights that rule uses.
+	 *
+	 * <p>
+	 * {@code policy} is a name rather than a flag, because it names one of the
+	 * rules in {@code domain} and the two are told apart by which one each answers
+	 * to: adding a third rule means a third name here, and a mismatch between this
+	 * value and a rule's name means no rule is registered at all.
+	 *
+	 * <p>
+	 * {@code weights} is read by the weighted rule and by nothing else — under
+	 * {@code monthly-sum} every transaction counts for its full value whatever this
+	 * map says, so that the stored weight and the compared weight cannot come from
+	 * two places that disagree.
+	 */
+	public record Limits(String policy, Map<String, BigDecimal> weights) {
+
+		/**
+		 * Refuses a weight that cannot mean what a weight has to mean.
+		 *
+		 * <p>
+		 * Zero would say a category's rows are inside the month's total and contribute
+		 * nothing to it — two statements about one number, with no way to tell from the
+		 * data which was meant. Exempting a category is a decision with a name, and if
+		 * that decision is ever wanted it belongs on the transaction rather than in a
+		 * multiplier. A negative weight is worse than either: it would let spending
+		 * bring a total back down, and the flag would stop meaning what it says.
+		 *
+		 * <p>
+		 * Same reasoning as {@code LedgerPolicy} and {@code RateCachePolicy}, and the
+		 * same trap as their checks: in a compact record constructor the fields are not
+		 * assigned yet, so this reads the parameters.
+		 */
+		public Limits {
+			Map<String, BigDecimal> copied = (weights == null) ? Map.of() : Map.copyOf(weights);
+			copied.forEach((category, weight) -> {
+				if (weight == null || weight.signum() <= 0) {
+					throw new IllegalArgumentException(
+							"app.limits.weights." + category + " must be greater than zero, was: " + weight);
+				}
+			});
+			weights = copied;
+		}
+
+		/** What a transaction of this category counts as, its full value by default. */
+		public BigDecimal weightOf(String categoryCode) {
+			return this.weights.getOrDefault(categoryCode, BigDecimal.ONE);
+		}
+
+	}
 
 	/**
 	 * Settings that concern every provider, plus the providers themselves.

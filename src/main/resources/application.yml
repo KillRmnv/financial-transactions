@@ -57,6 +57,28 @@ app:
     # Decimal places of a money amount.
     amount-scale: 2
 
+  limits:
+    # Which rule measures a limit. `monthly-sum` is the specification's: every
+    # transaction counts for what it cost. `weighted` also honours `weights` below.
+    # The weights are read by that rule alone — under `monthly-sum` a transaction
+    # counts for its full value whatever this map says, so the weight a row is stored
+    # with and the weight a flag is decided by cannot come from two places.
+    policy: monthly-sum
+    # What each category counts as against its limit, for the weighted rule. A
+    # category left out counts for its full value, so setting one weight does not
+    # mean enumerating the others. A weight of zero is refused at startup: exempting
+    # a category is a decision with a name, not a multiplier that counts nothing.
+    #
+    # A weight per category is arithmetically the same as dividing that category's
+    # limit by the weight: a limit is per category, and a category's transactions
+    # all carry the same weight, so `sum(w*x) > L` and `sum(x) > L/w` are one rule
+    # written twice. What a weight buys is a limit stated in the client's own units —
+    # "1000 units of service, where one unit is half a dollar". It becomes a genuinely
+    # different measurement only when the weight differs within a category or a
+    # transaction counts against more than one limit, and neither is expressible here.
+    # weights:
+    #   service: "0.5"
+
 
   # This is a cache, not a second source of truth: the database answers on its own, and an
   # unreachable Redis costs one extra lookup and nothing more. enabled: false skips Redis

@@ -91,6 +91,23 @@ public final class ExpenseTransaction {
 	@Column(name = "limit_id")
 	private Long limitId;
 
+	/**
+	 * What this transaction counts as against its limit, decided by the rule in
+	 * force when it was accepted.
+	 *
+	 * <p>
+	 * Stored rather than read from the category's configuration on every sum, for
+	 * the reason {@link #limitId} is stored: raising a weight in June must not
+	 * change what January's transactions meant, and a flag already decided cannot
+	 * be revisited.
+	 *
+	 * <p>
+	 * One by default, which is the whole of the behaviour of a rule that weighs
+	 * nothing.
+	 */
+	@Column(name = "limit_weight", nullable = false)
+	private BigDecimal limitWeight = BigDecimal.ONE;
+
 	@Column(name = "limit_exceeded")
 	private Boolean limitExceeded;
 
@@ -129,6 +146,24 @@ public final class ExpenseTransaction {
 	public void assign(Long newCategoryId, LocalDate newOccurredMonth) {
 		this.categoryId = newCategoryId;
 		this.occurredMonth = newOccurredMonth;
+	}
+
+	/**
+	 * Records what this transaction counts as against a limit.
+	 *
+	 * <p>
+	 * Null is read as "for its full value" rather than refused, for the same reason
+	 * the column defaults to one: a rule that weighs nothing has no opinion to
+	 * offer, and a transaction accepted while one was in force must not be storable
+	 * only under it. A zero or negative weight is a different matter and is refused
+	 * — see the CHECK.
+	 */
+	public void assignWeight(BigDecimal newWeight) {
+		if (newWeight != null && newWeight.signum() <= 0) {
+			throw new IllegalArgumentException("A transaction counts for its full value or less, never more and never "
+					+ "nothing; asked for a weight of " + newWeight);
+		}
+		this.limitWeight = (newWeight == null) ? BigDecimal.ONE : newWeight;
 	}
 
 	public void recordConversion(BigDecimal newSumInLedger, BigDecimal rate, LocalDate date) {

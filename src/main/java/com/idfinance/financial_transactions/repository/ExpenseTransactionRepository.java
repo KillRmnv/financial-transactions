@@ -11,8 +11,21 @@ import org.springframework.data.repository.query.Param;
 public interface ExpenseTransactionRepository extends JpaRepository<ExpenseTransaction, Long> {
 
 	/**
-	 * Sum already spent in the month, in the ledger currency, before the
-	 * transaction being processed.
+	 * What the month already holds against a limit, before the transaction being
+	 * processed.
+	 *
+	 * <p>
+	 * Summed by weight rather than by cost, because that is what a limit is
+	 * measured against. Under a rule that weighs everything at one this is the
+	 * month's spending; under a weighted one it is what the month's spending is
+	 * worth, and the weight of each transaction is read from its own row rather
+	 * than from the category's current configuration, so that changing a weight
+	 * later cannot change what an already-decided flag meant.
+	 *
+	 * <p>
+	 * A row with no conversion contributes nothing: {@code null} in the
+	 * multiplication makes the sum skip it, and {@code coalesce} turns a month with
+	 * no such rows into zero rather than into null.
 	 *
 	 * <p>
 	 * A new limit does not reset the month: transactions that predate it still
@@ -20,13 +33,13 @@ public interface ExpenseTransactionRepository extends JpaRepository<ExpenseTrans
 	 * 10.01.
 	 */
 	@Query("""
-			select coalesce(sum(t.sumInLedger), 0)
+			select coalesce(sum(t.sumInLedger * t.limitWeight), 0)
 			from ExpenseTransaction t
 			where t.accountFrom = :accountFrom
 			  and t.categoryId = :categoryId
 			  and t.occurredMonth = :month
 			""")
-	BigDecimal sumInLedgerForMonth(@Param("accountFrom") String accountFrom, @Param("categoryId") Long categoryId,
+	BigDecimal spentInLedgerForMonth(@Param("accountFrom") String accountFrom, @Param("categoryId") Long categoryId,
 			@Param("month") LocalDate month);
 
 	/**
