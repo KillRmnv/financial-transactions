@@ -1,5 +1,13 @@
 # Известные пробелы
 
+- **Схемы в OpenAPI-контракте названы в camelCase, хотя тело — в snake_case.** `TransactionResponse`
+  описывается полями `limitSum`, `sumInLedger`, `ledgerCurrency`, а отдаётся как `limit_sum`,
+  `sum_in_ledger`, `ledger_currency`. Примеры и параметры запроса в контракте правильные — они заданы
+  литералами, а не генерируются из имён компонентов. Причина найдена: в springdoc 3.1.0 есть
+  `PropertyNamingStrategyConverter`, но он читает стратегию именования `ObjectMapper` **целиком**, а
+  `@JsonNaming` задаёт её **на тип**, поэтому конвертеру нечего читать. Лечится переносом в
+  `spring.jackson.property-naming-strategy`, но это переименует и то, что пишет в Redis `RateCache`, —
+  изменение шире, чем кажется, и отдельное решение.
 - В `application.yml` нет секции datasource — намеренно; см. инструкции запуска в
   [`operations.md`](operations.md).
 - API-набор глушит внешнего провайдера через WireMock, сервисный — внутри процесса. Стратегия повторов
