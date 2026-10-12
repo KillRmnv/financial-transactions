@@ -91,10 +91,23 @@ right for "no scheduler in a test" and wrong for "stop paying for a call".
 
 ## Defects that pass review
 
-**The rate is looked up for the first day of the month**, not the transaction date, because
-`TransactionService` passes `occurredMonth` to the conversion. A rate stored for the 3rd is not
-found by a transaction on the 5th; two scenarios in `features/service/conversion_boundaries.feature`
-pin this down.
+**The sweep runs once per context, and that is the lock doing its job.** `refreshDaily`
+carries `lockAtMostFor = "PT10M"`, and ShedLock keeps a process-wide registry of locks it
+has taken — it consults that before touching the database at all. A second call in the
+same JVM is therefore refused silently: no log line, no error, the method body simply
+not invoked. `features/service/daily_rate_sweep.feature` is one scenario for exactly that
+reason, and it was one feature that could not be written as three scenarios until this
+was found. **Do not add `shedlock` to `StoredWorldCleaner`**: deleting the row while the
+registry still believes it exists leaves the provider skipping the insert, attempting an
+update that matches nothing, and refusing the lock — a state it cannot recover from.
+
+**A column name in an applied migration is not a detail.** `V2` created the lock table
+with `locked_until` and ShedLock writes `lock_until`, so `@SchedulerLock` failed on entry
+to the daily sweep in every environment: the table existed, the migration succeeded, the
+context started, and the job had never once run. Nothing caught it because nothing called
+`refreshDaily`. `V6__shedlock_lock_until.sql` is the fix, and the lesson is that a schema
+and a library have to agree on names — the same failure mode `SchedulerLockConfig` warns
+about for the table name, where the mismatch is equally invisible until the first run.
 
 **`applied_rate` and `rate_date` are a snapshot, not a reference.** They are stored on the
 transaction because `ExchangeRateService.store` updates the `currency_rate` row in place. A foreign

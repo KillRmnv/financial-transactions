@@ -133,9 +133,11 @@ fallback.
 | Произведение, которое колонка не вместит: сумма на границе × `10.00000001` → 400, а не падение на вставке. Граница одна на произведение, а не на сумму | **BVA** | `A product the ledger column cannot hold is refused, not written` |
 | Курс ровно 10 держит сумму на границе внутри колонки — ровно та величина, ради которой граница на цифру ниже потолка колонки | **BVA** | `A rate of exactly ten keeps a sum at the boundary inside the column` |
 | Курс меньше единицы границы не достигает никогда: сумма на границе уходит вниз | **BVA** | `A currency whose rate is below one cannot overflow at any legal sum` |
-| Курс берётся на первое число месяца, а не на дату транзакции | **ТЗ** | `The rate of the month's first day is used as it is` |
-| Курс за 3-е число не находится транзакцией от 5-го | **BVA** | `A later day of the same month is not the rate of this month` |
-| Месяц без своего курса берёт последний более ранний | **EP** | `A month with no rate of its own falls back to the most recent earlier one` |
+| Курс берётся за день расхода, а не за первое число месяца | **ТЗ** | `The rate used is the one for the day of the expense` |
+| Курс, опубликованный позже, не котирует более ранний день | **BVA** | `A rate published after the day does not price it` |
+| Единственный курс месяца, за более ранний день, берётся как есть | **EP** | `A rate from earlier in the month is used as it is` |
+| День без своего курса берёт последний более ранний | **EP** | `A month with no rate of its own falls back to the most recent earlier one` |
+| Ежедневный свип пишет курс за вчера, и транзакция за этот день обходится без обращения к провайдеру | **Регресс** | `The sweep stores yesterday, and that row is what the transaction reads` |
 | Валюты без курса нигде: транзакция сохраняется без флага | **EP** | `A currency with no rate anywhere is stored rather than dropped` |
 | Провайдер недоступен: теряется курс, не транзакция (п. 133 задания) | **EP** | `A provider that is down does not cost the transaction` |
 | Найденный курс используется без обращения к провайдеру | **EP** | `A stored rate is found without asking the provider at all` |

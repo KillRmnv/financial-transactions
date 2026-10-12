@@ -100,6 +100,24 @@ public class StoredWorldCleaner {
 	}
 
 	/**
+	 * The lock table is deliberately not emptied here, and this is the reason.
+	 *
+	 * <p>
+	 * Emptying it looks harmless and is not. ShedLock remembers a lock it has taken
+	 * in a process-wide registry, and consults that before touching the database,
+	 * so deleting the row leaves the provider believing a record still exists —
+	 * after which it skips the insert, tries an update that matches no row, and
+	 * refuses the lock. Nothing is logged and nothing fails; the job simply does
+	 * not run, for as long as the registry entry lasts.
+	 *
+	 * <p>
+	 * The consequence for the suite is that {@code refreshDaily} can be called once
+	 * per context, because the annotation holds the lock for ten minutes by design
+	 * — which is the same property that stops two replicas paying for the same
+	 * rate. The scenarios about it live in one feature for that reason.
+	 */
+
+	/**
 	 * Puts the tracked-currency set back the way the migration seeded it.
 	 *
 	 * <p>

@@ -119,16 +119,22 @@ public class ScheduledRatesFetcher {
 			return;
 		}
 
-		// The first of the month, not today. TransactionService asks for a rate for
-		// occurredMonth,
-		// which is the first day of the month the transaction belongs to, so a rate
-		// stored under any
-		// other date is found by neither findForDay nor findLatestOnOrBefore and the
-		// next transaction of
-		// that month goes to the provider anyway. Verified on a live database: a rate
-		// stored for the
-		// 10th is invisible to a transaction whose month starts on the 1st.
-		LocalDate rateDate = LocalDate.now(this.clock).withDayOfMonth(1);
+		// Yesterday, not today and not the first of the month. The transaction path
+		// asks for the day of the expense (MonthBoundary.dayOf), so a row keyed by any
+		// other day is never found by findForDay — it is answered instead by
+		// findLatestOnOrBefore as "the last one not later than", which is a price from
+		// further back than the day's own. Keying the row by the day asked for is what
+		// makes findForDay hit and the day's close win.
+		//
+		// Not today: at 07:00 today's close is not published yet — the US session
+		// closes around 21:00 UTC — so the adapter would take its previous_close
+		// fallback and stamp yesterday's price under today's date. Yesterday's close is
+		// what is available at this hour, and that is why the hour is 07:00.
+		//
+		// A day with no close of its own (Saturday) stores the last one before it,
+		// dated Saturday: the previous_close rule of specification point 3 applied by
+		// date, so the Monday that follows falls back to that row.
+		LocalDate rateDate = LocalDate.now(this.clock).minusDays(1);
 		Instant startedAt = Instant.now(this.clock);
 
 		List<Currency> bases = trackedCurrencies();

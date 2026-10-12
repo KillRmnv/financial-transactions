@@ -96,8 +96,15 @@ app:
   # already there, so the sweep reads a number instead of learning there is none. Fetching earlier
   # would spend a request on a file that has not appeared yet.
   #
-  # The sweep reads the rate for the first day of the month, not for the day it runs on, so the
-  # offset to "yesterday's close" does not matter here: the 1st's close has been available for days.
+  # The sweep stores yesterday, not today: today's close is not out yet at this hour. That is what
+  # makes the offset above a hard requirement rather than a preference — asking for today would take
+  # the previous_close fallback and stamp yesterday's price under today's date. Storing the day it
+  # runs on would be the other wrong answer, for the same reason read a day late.
+  #
+  # The date is deliberately the one the transaction path asks for: a rate is looked up for the day of
+  # the expense, so a row dated anything else is found only as "the last one not later than", which is
+  # a price from further back than the day's own.
+  #
   # It also lands inside the working morning in both markets the specification names.
   scheduled-fetch-hour: 7
 

@@ -49,6 +49,16 @@ public final class SchedulerLockConfig {
 	 * The table {@code V2__shedlock.sql} creates. Named here as well because
 	 * ShedLock's default is {@code shedlock} and a mismatch is a runtime error at
 	 * the first sweep rather than at startup.
+	 *
+	 * <p>
+	 * The column names are deliberately <em>not</em> configured: this provider
+	 * takes the table and otherwise ShedLock's own defaults, {@code lock_until},
+	 * {@code locked_at}, {@code locked_by}. They have to match the migration
+	 * exactly, and the mismatch is the same kind of failure as the table name — a
+	 * schema that exists and a job that fails the first time it runs. V2 named the
+	 * first one {@code locked_until}, and {@code V6__shedlock_lock_until.sql} is
+	 * what corrected it; renaming a column in an applied migration is what Flyway
+	 * refuses outright.
 	 */
 	private static final String LOCK_TABLE = "shedlock";
 
