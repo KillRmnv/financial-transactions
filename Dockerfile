@@ -1,4 +1,13 @@
-FROM eclipse-temurin:25-jdk-jammy AS build
+# Pinned by digest, tag kept for readability: `25-jdk-jammy` and `25-jre-jammy` are mutable, so
+# two builds of the same commit could compile against one JDK and run on another, and six months
+# later the repository could not say what was in production. Two mutable tags make that worse rather
+# than better — the build and the runtime stages update independently.
+#
+# Dependabot's `docker` ecosystem updates these digests, so pinning is a pull request that CI
+# checks rather than a chore: the image rebuilds and the 274 tests and the startup smoke check run
+# against the new base before anyone merges it. Refresh one by hand with
+# `docker buildx imagetools inspect eclipse-temurin:<tag>` and read its Digest.
+FROM eclipse-temurin:25-jdk-jammy@sha256:318f90a80337fb6f26b025dbec0a95fa6f48abf60ce129babf555618356bdbf8 AS build
 WORKDIR /workspace
 
 COPY .mvn/ .mvn/
@@ -11,7 +20,7 @@ RUN ./mvnw -B -ntp -DskipTests package
 # Runtime stage: JRE only, non-root user, no build tooling.
 # curl is here on purpose: it backs the HEALTHCHECK and the CI smoke check, and the temurin JRE image
 # does not ship wget.
-FROM eclipse-temurin:25-jre-jammy AS runtime
+FROM eclipse-temurin:25-jre-jammy@sha256:25777acfabf927084b7ef46d8bc786b6203c8c344f56541054238b8c4fe73db9 AS runtime
 WORKDIR /app
 
 RUN apt-get update \

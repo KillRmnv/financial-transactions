@@ -1,0 +1,77 @@
+# Dependency updates, for a project whose build is the thing being reviewed.
+#
+# The default is deliberately timid, and every limit below was added for a specific
+# reason rather than as a precaution:
+#
+#   versioning-strategy: increase-if-necessary — take the newest version that is
+#     actually required, not the newest that exists.
+#
+#   ignore: no major updates — Spring Boot 3 to 4 renamed most starters, so a major
+#     bump is a migration rather than an upgrade, and it does not arrive in a pull
+#     request that anyone is going to read properly. Security updates are a separate
+#     path and are not affected by this.
+#
+#   cooldown: 7 days — a release that broke something stops being proposed a week
+#     later, by which time the ecosystem has said so. GitHub's own default is three
+#     days, which is short enough to catch a bad patch release on its own. Security
+#     updates bypass the cooldown entirely, which is why this is safe: a real
+#     vulnerability is never held back by it.
+#
+#   open-pull-requests-limit: 5 — a queue nobody reads is worse than no queue, so
+#     the overflow waits rather than joining the noise.
+#
+# No auto-merge anywhere. A dependency bump is green or red and nothing in between,
+# and the failures that matter here are the ones a build cannot see.
+#
+# Several versions in this pom are pinned for a reason recorded in AGENTS.md, and a
+# pull request touching one of them should be closed rather than merged: cucumber
+# (8.0.4 is built against the Spring the Boot parent supplies), lombok (the version
+# Boot manages crashes the JDK this builds on), and spotbugs alongside
+# spotbugs-annotations (two different version schemes, one line of properties each).
+# They are deliberately not listed under `ignore`: a security fix for one of them
+# must still arrive, and that decision belongs where the reason is written down.
+
+version: 2
+
+updates:
+  - package-ecosystem: "maven"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    versioning-strategy: "increase-if-necessary"
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+
+  # The base images, pinned by digest in the Dockerfile. Dependabot reads the digest and opens a
+  # pull request when it moves, which is the whole reason pinning them by hand is not a chore: the
+  # pull request rebuilds the image and quality.yml smoke-checks the real startup before it is
+  # merged. A mutable tag would have applied the change instead, silently and untested.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    versioning-strategy: "increase"
+    cooldown:
+      default-days: 7
+
+  # The GitHub Actions this repository runs on. A workflow pinning a third-party
+  # action is the same dependency with a shorter half-life — the action is not
+  # versioned by Maven and nothing else here would notice it moving.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    versioning-strategy: "increase-if-necessary"
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
