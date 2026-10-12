@@ -10,12 +10,13 @@ Feature: Rates are cached in Redis in front of the database
 
   **A refresh is visible at once.** A cached answer outlives the row it came from until
   something says otherwise, and a cache that retires only the key it happens to know
-  about is wrong here in a way that looks right. It is worse now than it was: the rate
-  is stored under the first day of the month, but a transaction of the 5th asks about
-  the 5th and caches that, and a transaction of the 6th asks about the 6th and caches
-  that — two entries, both answering from a rate published on the 1st. Retiring the
-  entry for the day someone happened to convert on would leave the other one serving a
-  rate that no longer exists, which is the answer that looks most right of all.
+  about is wrong here in a way that looks right. The key is the day that was **asked
+  for**, not the day the answer came from: a transaction of the 5th asks about the 5th,
+  finds the rate of the 1st because nothing newer exists, and caches it under the 5th —
+  a transaction of the 6th does the same under the 6th. Two entries, both answering from
+  one row. Retiring the entry for the day someone happened to convert on would leave the
+  other serving a rate that no longer exists, which is the answer that looks most right
+  of all.
 
   The refresh goes through the service rather than through SQL, because that is where
   the invalidation lives. A scenario that updated the row directly would be testing a

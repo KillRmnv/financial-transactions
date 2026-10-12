@@ -3,6 +3,7 @@ package com.idfinance.financial_transactions.bdd.support;
 import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.service.RatesProvider;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -11,12 +12,15 @@ import java.util.List;
  * network.
  *
  * <p>
- * Two of the three answers are refusals, and that is the point.
  * {@link Mode#UNKNOWN} returns no rate for anything but the ledger currency,
  * which is what sends a transaction in a real currency down the full lookup
  * chain and leaves it stored without a flag. {@link Mode#FAILING} throws, which
  * is what a provider outage looks like to {@code ExchangeRateService} and
- * therefore what must not fail the ingestion path.
+ * therefore what must not fail the ingestion path. {@link Mode#ANSWERING}
+ * quotes whatever it is asked for, which is what an up provider does and what a
+ * scenario asserting the sweep's own behaviour needs: everything else runs
+ * against a stub that says "no", so the daily job would store nothing and could
+ * not be observed.
  *
  * <p>
  * The ledger currency is read from {@link LedgerPolicy} rather than spelled
@@ -38,6 +42,20 @@ public class StubRatesProvider implements RatesProvider {
 	private volatile boolean currencyListingFails;
 
 	private int currencyListingCalls;
+
+	private int rateCalls;
+
+	/**
+	 * What {@link Mode#ANSWERING} quotes.
+	 *
+	 * <p>
+	 * A plausible close rather than a chosen one: the scenarios that set this mode
+	 * assert which <em>day</em> a rate was stored for and whether the provider was
+	 * asked at all, never an amount. Digits are picked so a realistic sum converts
+	 * into something the ledger column holds, and it is a rate below one because
+	 * that is what a quote of a foreign currency into the ledger is.
+	 */
+	private static final BigDecimal ANSWERED = new BigDecimal("0.00222");
 
 	public StubRatesProvider(LedgerPolicy ledgerPolicy) {
 		this.ledgerPolicy = ledgerPolicy;
@@ -70,11 +88,19 @@ public class StubRatesProvider implements RatesProvider {
 
 	@Override
 	public ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
+		// Counted on entry rather than on a successful answer: a scenario asserting
+		// that
+		// the caller never reached the provider is asserting this was not entered, and
+		// an entry that then threw still cost the round trip.
+		this.rateCalls++;
 		if (this.ledgerPolicy.isLedgerCurrency(baseCurrency)) {
 			return ExchangeRate.identity(baseCurrency, date);
 		}
 		if (this.mode == Mode.FAILING) {
 			throw new IllegalStateException("The rates provider is unreachable");
+		}
+		if (this.mode == Mode.ANSWERING) {
+			return new ExchangeRate(baseCurrency, quoteCurrency, date, ANSWERED, null, name());
 		}
 		return null;
 	}
@@ -105,6 +131,24 @@ public class StubRatesProvider implements RatesProvider {
 		this.currencyListingCalls = 0;
 	}
 
+	/**
+	 * How many times {@link #rateFor} was entered.
+	 *
+	 * <p>
+	 * The assertion for anything the service is supposed to answer out of its own
+	 * table. A rate that should have been stored but was not costs a call that a
+	 * scenario reading only the stored row would never see, because the transaction
+	 * is stored either way — with the flag left uncalculated, which looks like a
+	 * missing rate rather than a missed sweep.
+	 */
+	public int rateCalls() {
+		return this.rateCalls;
+	}
+
+	public void resetRateCalls() {
+		this.rateCalls = 0;
+	}
+
 	@Override
 	public String name() {
 		return "stub";
@@ -119,7 +163,18 @@ public class StubRatesProvider implements RatesProvider {
 		UNKNOWN,
 
 		/** Refuses outright, as an unreachable provider would. */
-		FAILING
+		FAILING,
+
+		/**
+		 * Quotes every day it is asked about, which is what an up provider does.
+		 *
+		 * <p>
+		 * Needed by the daily sweep's scenarios and by nothing else: with the default
+		 * {@link #UNKNOWN} the job stores nothing, so "the sweep wrote a row dated
+		 * yesterday" has no row to be about and the assertion fails for a reason that
+		 * has nothing to do with the date it was checking.
+		 */
+		ANSWERING
 
 	}
 
