@@ -3,8 +3,14 @@
 # The default is deliberately timid, and every limit below was added for a specific
 # reason rather than as a precaution:
 #
-#   versioning-strategy: increase-if-necessary — take the newest version that is
-#     actually required, not the newest that exists.
+# There is deliberately no `versioning-strategy` here. It was in the first draft of
+# this file and Dependabot rejected the whole configuration over it: the key does not
+# belong inside `updates[]`, and it is supported by bundler, cargo, composer, helm,
+# mix, npm, pip, pub and uv — not by Maven, Docker or GitHub Actions. It would have
+# been ignored here even if it validated. Its absence costs nothing anyway: it only
+# differs from the default when a manifest declares a *range* that already allows the
+# new release, and this pom declares exact versions under a parent, so every strategy
+# produces the same diff.
 #
 #   ignore: no major updates — Spring Boot 3 to 4 renamed most starters, so a major
 #     bump is a migration rather than an upgrade, and it does not arrive in a pull
@@ -39,7 +45,6 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    versioning-strategy: "increase-if-necessary"
     cooldown:
       default-days: 7
     ignore:
@@ -56,7 +61,6 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
-    versioning-strategy: "increase"
     cooldown:
       default-days: 7
 
@@ -68,7 +72,6 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
-    versioning-strategy: "increase-if-necessary"
     cooldown:
       default-days: 7
     ignore:
