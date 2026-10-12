@@ -69,7 +69,7 @@ public final class LimitController {
 			moment: there is no date in the body, which is what makes backdating impossible. A client
 			may install as many limits as it likes; only updating an existing one is forbidden.""")
 	@ApiResponse(responseCode = "201", description = "Installed")
-	@io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "application/json", examples = @ExampleObject(name = "raiseTheJanuaryLimit", summary = "Raising the limit to 2000", value = "{\"accountFrom\":\"0000000123\",\"expenseCategory\":\"product\",\"sum\":2000.00}")))
+	@io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "application/json", examples = @ExampleObject(name = "raiseTheJanuaryLimit", summary = "Raising the limit to 2000", value = "{\"account_from\":\"0000000123\",\"expense_category\":\"product\",\"sum\":2000.00}")))
 	@ApiResponse(responseCode = "400", description = "The body failed validation", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "Unknown category", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "429", description = "The calling address exhausted its request quota", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
@@ -90,7 +90,7 @@ public final class LimitController {
 
 			`expense_category` narrows the report to one category. Both categories are always answered:
 			a category nobody has installed a limit for is reported as the automatic 1000 USD fallback, with
-			`limitDatetime` null and `limitDefault` true, because the specification keeps a limit per
+			`limit_datetime` null and `limit_default` true, because the specification keeps a limit per
 			category and takes an unset one as 1000 — whether or not the account has ever spent on it. An
 			omitted category from the list would read as "no limit applies there".
 
@@ -112,9 +112,9 @@ public final class LimitController {
 	}
 
 	@Operation(summary = "List the transactions that exceeded the limit", description = """
-			Each row carries `limitSum`, `limitDatetime` and `limitCurrencyShortname` for the limit the
+			Each row carries `limit_sum`, `limit_datetime` and `limit_currency_shortname` for the limit the
 			flag was actually computed against, which is not necessarily the limit installed today.
-			`limitDatetime` is null for the automatic 1000 USD fallback, which has no installation
+			`limit_datetime` is null for the automatic 1000 USD fallback, which has no installation
 			event of its own.
 
 			`expense_category` narrows the report to one category, and is the same optional filter

@@ -29,6 +29,7 @@ public record LimitRequest(
 		@NotBlank @Schema(description = "Exactly `product` or `service`", example = "product", allowableValues = {
 				"product", "service"}) @JsonAlias("expenseCategory") String expenseCategory,
 
-		@NotNull @DecimalMin(value = "0.00", inclusive = false) @Digits(integer = LedgerPolicy.MAX_AMOUNT_INTEGER_DIGITS, fraction = LedgerPolicy.MAX_AMOUNT_FRACTION_DIGITS) @Schema(description = "The limit, always in the ledger currency. There is no currency field because there is no choice to make. At most 11 integer and 8 fraction digits", example = "2000.00") BigDecimal sum) {
+		@NotNull @DecimalMin(value = "0.00", inclusive = false) @Digits(integer = LedgerPolicy.MAX_AMOUNT_INTEGER_DIGITS, fraction = LedgerPolicy.MAX_AMOUNT_FRACTION_DIGITS) @Schema(description = "The limit, always in the ledger currency."
+				+ " There is no currency field because there is no choice to make. At most 11 integer and 8 fraction digits", example = "2000.00") BigDecimal sum) {
 
 }

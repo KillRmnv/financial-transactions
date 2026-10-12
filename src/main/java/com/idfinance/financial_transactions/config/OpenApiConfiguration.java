@@ -32,8 +32,8 @@ public class OpenApiConfiguration {
 
 			Two things a reader cannot infer from the field names:
 
-			* `sum` arrives in the transaction's own currency; `sumInLedger` is that amount converted into \
-			the ledger currency. Both it and `limitExceeded` are null when no exchange rate was available — \
+			* `sum` arrives in the transaction's own currency; `sum_in_ledger` is that amount converted into \
+			the ledger currency. Both it and `limit_exceeded` are null when no exchange rate was available — \
 			a missing answer, not `false`.
 			* the flag follows a strict comparison, so a remaining balance of exactly zero is **not** \
 			exceeded.

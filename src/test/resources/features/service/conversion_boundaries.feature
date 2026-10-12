@@ -18,11 +18,13 @@ Feature: The boundaries of converting into the ledger currency
   convert an amount into a negative ledger figure, and a zero rate would silently
   report every transaction as free. The lookup discards those rather than applying them.
 
-  **The rate is looked up for the first day of the month**, not for the day the
-  transaction happened, because `TransactionService` passes `occurredMonth` to the
-  conversion. So a rate seeded for the 3rd of January is not found by a transaction of
-  the 5th, while one seeded for the 1st is. Every scenario below dates its rate
-  accordingly, and two of them exist to pin that behaviour down.
+  **The rate is looked up for the day the transaction happened**, not for the first
+  day of its month: `TransactionService` passes `MonthBoundary.dayOf(occurredAt)` to
+  the conversion. A rate seeded for the 5th is therefore the one a transaction of the
+  5th uses, and one seeded for the 7th is not used at all — a price published later
+  cannot price an earlier day. A rate seeded for the 1st still answers for the 5th,
+  but only through the fallback for a day with no rate of its own. Two scenarios below
+  exist to pin the ordering down.
 
   Background:
     Given the account "0000000123" and the category "product"
@@ -82,7 +84,7 @@ Feature: The boundaries of converting into the ledger currency
     When a transaction of "99999999999.99999999" KZT was posted on "2022-01-05"
     Then the transaction of "2022-01-05" totals "1000.00000000" USD
 
-  Scenario: The rate of the month's first day is used as it is
+  Scenario: A rate from earlier in the month is used as it is
     Given the rate for "KZT" on "2022-01-01" is 0.5
     When a transaction of "100" KZT was posted on "2022-01-05"
     Then the transaction of "2022-01-05" totals "50.00" USD
