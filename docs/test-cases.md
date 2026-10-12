@@ -137,7 +137,10 @@ fallback.
 | Курс, опубликованный позже, не котирует более ранний день | **BVA** | `A rate published after the day does not price it` |
 | Единственный курс месяца, за более ранний день, берётся как есть | **EP** | `A rate from earlier in the month is used as it is` |
 | День без своего курса берёт последний более ранний | **EP** | `A month with no rate of its own falls back to the most recent earlier one` |
-| Ежедневный свип пишет курс за вчера, и транзакция за этот день обходится без обращения к провайдеру | **Регресс** | `The sweep stores yesterday, and that row is what the transaction reads` |
+| Ежедневный свип пишет курс за день, которым котируется вчера, и транзакция обходится без обращения к провайдеру | **Регресс** | `The sweep stores the day that prices yesterday, and that row is what the transaction reads` |
+| Суббота котируется пятницей | **BVA** | `A Saturday is priced by the Friday before it` |
+| Воскресенье котируется пятницей, а не субботой | **BVA** | `A Sunday is priced by the Friday before it, and not by the Saturday` |
+| Праздник не сокращается: сервис не умеет его видеть | **BVA** | `A holiday is not shortened, because the service cannot see one` |
 | Валюты без курса нигде: транзакция сохраняется без флага | **EP** | `A currency with no rate anywhere is stored rather than dropped` |
 | Провайдер недоступен: теряется курс, не транзакция (п. 133 задания) | **EP** | `A provider that is down does not cost the transaction` |
 | Найденный курс используется без обращения к провайдеру | **EP** | `A stored rate is found without asking the provider at all` |

@@ -14,9 +14,11 @@ Feature: The daily sweep stores the day somebody will ask for
   The row used to be dated the first of the month, because that is what the conversion
   asked for then. It no longer is, and the sweep moved with it.
 
-  The dates are absolute so the arithmetic is visible rather than implied: the clock
-  reads 2026-10-11, so yesterday is 2026-10-10 and the first of the month is
-  2026-10-01.
+  The dates are absolute so the arithmetic is visible rather than implied. The clock
+  reads Sunday 2026-10-11, so yesterday is Saturday 2026-10-10 — which has no close of
+  its own, and is priced by the Friday before it, 2026-10-09. The first of the month is
+  2026-10-01 and nobody asks for it. All three dates are asserted, because a sweep
+  writing any one of them instead of 2026-10-09 satisfies none of the claims below.
 
   One scenario rather than three, and that is the job's own doing: `refreshDaily`
   carries `lockAtMostFor = "PT10M"`, so the first call in a context holds the lock for
@@ -24,19 +26,20 @@ Feature: The daily sweep stores the day somebody will ask for
   replicas paying twice for the same rate, so the constraint is the feature and not
   something to route around.
 
-  Scenario: The sweep stores yesterday, and that row is what the transaction reads
+  Scenario: The sweep stores the day that prices yesterday, and that row is what the transaction reads
     Given the account "0000000123" and the category "product"
     And the clock reads "2026-10-11T12:00:00Z"
     And the provider answers every rate lookup
 
     When the daily rate sweep runs
     Then the provider was asked for a rate
-    And a rate for "KZT" is stored for "2026-10-10"
+    And a rate for "KZT" is stored for "2026-10-09"
+    And no rate for "KZT" is stored for "2026-10-10"
     And no rate for "KZT" is stored for "2026-10-01"
 
     # The row is one thing; being found by the transaction that needs it is another.
     # A rate stored somewhere nobody reads costs the same call as no rate at all, so
-    # the call is what is asserted — an unread row answers the three lines above
+    # the call is what is asserted — an unread row answers the four lines above
     # perfectly. Nothing here can be served from memory either: the coordinator only
     # hands one answer to callers that overlap in time, and drops it after.
     When the provider's rate lookups are forgotten

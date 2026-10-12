@@ -101,6 +101,21 @@ was found. **Do not add `shedlock` to `StoredWorldCleaner`**: deleting the row w
 registry still believes it exists leaves the provider skipping the insert, attempting an
 update that matches nothing, and refusing the lock — a state it cannot recover from.
 
+**`PricingDay` shortens the weekend before anyone is asked, and holidays stay two
+requests.** A Saturday asked for directly costs two provider calls — the day's own, then
+the adapter's ten-day fallback window — where the Friday before costs one. Both the sweep
+and `TransactionService` route through the rule, because a row one of them writes and the
+other reads is the exact defect they had when the conversion asked for the first of the
+month. It is an exchange-rate rule, not an instrument rule: `currency_pair` is
+operator-editable and the lookup carries crypto and equities, so a seven-day instrument
+must not be shortened to Friday.
+
+**The weekend rule changes no answer, only the number of requests.** `findLatestOnOrBefore`
+already prices a Saturday by Friday, so a scenario asserting the rate passes with or
+without `PricingDay`. Only the day the rate is *recorded* as coming from tells them apart,
+and only because a stub answers with the date it was asked for. Both features make that
+assertion, and neither asserts the rate alone.
+
 **A column name in an applied migration is not a detail.** `V2` created the lock table
 with `locked_until` and ShedLock writes `lock_until`, so `@SchedulerLock` failed on entry
 to the daily sweep in every environment: the table existed, the migration succeeded, the

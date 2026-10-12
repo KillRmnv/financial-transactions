@@ -100,6 +100,38 @@ Feature: The boundaries of converting into the ledger currency
     Then the transaction of "2022-01-05" totals "40.00" USD
     And the rate used for "2022-01-05" is 0.4
 
+  # The weekend, decided before the provider is asked rather than after it fails to
+  # answer: a Saturday and a Sunday have no close of their own, so the Friday before
+  # prices both, and asking for the Friday is one request where asking for the weekend
+  # is two — the day's own, then the adapter's fallback window.
+  #
+  # Nothing else about the answer changes: findLatestOnOrBefore already prices a
+  # Saturday by Friday, so a scenario asserting only the rate would pass either way.
+  # What is claimed is the day the rate is recorded as coming from, and the provider
+  # here answers with the date it was asked for, so that is the day under test.
+  Scenario: A Saturday is priced by the Friday before it
+    Given the provider answers every rate lookup
+    When a transaction of "100" KZT was posted on "2022-01-08"
+    Then the transaction of "2022-01-08" totals "0.22200000" USD
+    And the rate for the transaction of "2022-01-08" is dated "2022-01-07"
+
+  # Two scenarios rather than an outline: a date in an Examples cell is parsed as an
+  # int-int-int expression, so `<day>` arrives as three numbers and no step matches.
+  Scenario: A Sunday is priced by the Friday before it, and not by the Saturday
+    Given the provider answers every rate lookup
+    When a transaction of "100" KZT was posted on "2022-01-09"
+    Then the transaction of "2022-01-09" totals "0.22200000" USD
+    And the rate for the transaction of "2022-01-09" is dated "2022-01-07"
+
+  # A holiday is a weekday with no close and nothing in this service can tell it from a
+  # day the provider missed, so it still costs two requests. Stated rather than
+  # asserted: the stub answers every day, so no scenario here can separate a holiday
+  # from an ordinary Tuesday.
+  Scenario: A holiday is not shortened, because the service cannot see one
+    Given the provider answers every rate lookup
+    When a transaction of "100" KZT was posted on "2022-01-10"
+    Then the rate for the transaction of "2022-01-10" is dated "2022-01-10"
+
   # The other direction of the same rule, and the one it is easy to get wrong: a rate
   # published after the day must not price it, even though it sits in the same month and
   # is nearer on the calendar than anything earlier.

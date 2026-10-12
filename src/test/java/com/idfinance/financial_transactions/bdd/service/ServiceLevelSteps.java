@@ -282,6 +282,16 @@ class ServiceLevelSteps {
 				.as("the flag of %s was computed rather than left uncalculated", isoDate).isTrue();
 	}
 
+	@Then("the rate for the transaction of {string} is dated {string}")
+	void theRateForTheTransactionIsDated(String isoDate, String isoRateDate) {
+		// The day the rate was taken from, which is not always the day the transaction
+		// happened: a weekend is priced by the Friday before it. Asserting only the
+		// rate would pass either way, since the fallback and the pricing day produce
+		// the same number — this is what tells them apart.
+		Assertions.assertThat(transactionOf(isoDate).getRateDate()).as("the day the rate came from")
+				.isEqualTo(LocalDate.parse(isoRateDate));
+	}
+
 	@Then("the rate used for {string} is {word}")
 	void theRateUsedFor(String isoDate, String expected) {
 		Assertions.assertThat(transactionOf(isoDate).getAppliedRate()).as("the rate stored on the transaction")
