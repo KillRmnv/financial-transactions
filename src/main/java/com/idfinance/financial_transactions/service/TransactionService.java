@@ -5,6 +5,7 @@ import com.idfinance.financial_transactions.config.RateTimeouts;
 import com.idfinance.financial_transactions.domain.LimitContext;
 import com.idfinance.financial_transactions.domain.LimitPolicy;
 import com.idfinance.financial_transactions.domain.MonthBoundary;
+import com.idfinance.financial_transactions.domain.PricingDay;
 import com.idfinance.financial_transactions.dto.TransactionRequest;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.ExpenseCategory;
@@ -255,7 +256,7 @@ public class TransactionService {
 		transaction.assignWeight(this.limitPolicy.weightOf(category.getCode()));
 
 		ExchangeRateService.Conversion conversion = this.exchangeRateService.convert(transaction.getAmount(), currency,
-				this.monthBoundary.dayOf(occurredAt));
+				PricingDay.of(this.monthBoundary.dayOf(occurredAt)));
 		// The rate is the one for the day of the expense, as the specification asks,
 		// and not the month's opening rate. The month is still what the flag is
 		// measured over — that is a separate question, and `occurredMonth` answers it

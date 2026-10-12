@@ -4,6 +4,7 @@ import com.idfinance.financial_transactions.config.LedgerPolicy;
 import com.idfinance.financial_transactions.config.RateTimeouts;
 import com.idfinance.financial_transactions.config.SchedulerLockConfig;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.domain.PricingDay;
 import com.idfinance.financial_transactions.entity.Currency;
 import com.idfinance.financial_transactions.entity.CurrencyPair;
 import com.idfinance.financial_transactions.entity.ScheduledJob;
@@ -134,7 +135,13 @@ public class ScheduledRatesFetcher {
 		// A day with no close of its own (Saturday) stores the last one before it,
 		// dated Saturday: the previous_close rule of specification point 3 applied by
 		// date, so the Monday that follows falls back to that row.
-		LocalDate rateDate = LocalDate.now(this.clock).minusDays(1);
+		// A day with no close of its own — a Saturday or a Sunday — is priced by the
+		// Friday before it, and asking for Friday answers in one request where asking
+		// for the weekend costs a second one over the fallback window. Both callers
+		// have
+		// to agree: the row written here has to be the row the transaction path reads,
+		// which is the same reason this is not open to the caller.
+		LocalDate rateDate = PricingDay.of(LocalDate.now(this.clock).minusDays(1));
 		Instant startedAt = Instant.now(this.clock);
 
 		List<Currency> bases = trackedCurrencies();
