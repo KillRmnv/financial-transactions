@@ -22,6 +22,17 @@ Feature: A rate the paid provider does not have
     Then the resolved rate is "0.00222"
     And the stored rate names "frankfurter" as its source
 
+  # The case the chain used to let out to the caller. A provider that answered and
+  # said it had no data, and a provider that could not be reached at all, are the
+  # same outcome for the chain only if it catches nothing — and the fallback is
+  # there for exactly this one: it has neither a key nor a quota to spend.
+  Scenario: The fallback answers when the paid provider cannot be reached
+    Given the paid provider cannot be reached
+    And the fallback answers "KZT" against "USD" on "2022-01-08" at "0.00222"
+    When a rate is resolved for "KZT" against "USD" on "2022-01-08"
+    Then the resolved rate is "0.00222"
+    And the stored rate names "frankfurter" as its source
+
   Scenario: The paid provider is asked first
     Given the paid provider answers "KZT" against "USD" on "2022-01-08" at "450.00"
     And the fallback answers "KZT" against "USD" on "2022-01-08" at "0.00222"

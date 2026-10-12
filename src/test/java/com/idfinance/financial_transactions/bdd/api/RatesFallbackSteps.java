@@ -86,6 +86,21 @@ class RatesFallbackSteps {
 		this.ratesStub.withoutSymbol(quote, base);
 	}
 
+	/**
+	 * The paid provider answered and could not: a 503 rather than a 404.
+	 *
+	 * <p>
+	 * A distinct wording from {@code ApiSteps}' "the provider is unreachable"
+	 * rather than a shared one, because this file names two providers throughout
+	 * and a step that means only the first of them has to say so. Two patterns that
+	 * both match one line of Gherkin are reported as ambiguous, not resolved in
+	 * favour of either, so the wording has to differ as well as the meaning.
+	 */
+	@Given("the paid provider cannot be reached")
+	void thePaidProviderCannotBeReached() {
+		this.ratesStub.failing();
+	}
+
 	@Given("the paid provider publishes no currencies")
 	void thePaidProviderPublishesNoCurrencies() {
 		// Not "not configured": the bean is present and answers rates, it just has no

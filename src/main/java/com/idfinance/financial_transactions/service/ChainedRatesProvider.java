@@ -2,6 +2,7 @@ package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
+import com.idfinance.financial_transactions.logging.SafeLog;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -76,11 +77,28 @@ import org.springframework.stereotype.Component;
  * list, and every adapter would have to declare it.
  *
  * <p>
- * A transport failure does not fall through. The caller already treats that as
- * "store it without a flag", and retrying it against the next provider would
- * turn one outage into two requests and then the same answer. Which failures
- * are which is the adapter's business: a 404 for a pair the provider does not
- * publish comes back as null, not as an exception.
+ * A failure does fall through, which reverses what this class used to decide.
+ * It once let a transport failure out to the caller on the grounds that the
+ * caller already treats it as "store it without a flag", and that retrying
+ * against the next provider would "turn one outage into two requests and then
+ * the same answer". That is right when the whole world is down and wrong in the
+ * case that actually happens: the paid provider spends its quota, or answers
+ * 503 or 429 for one symbol, while the free one next in the chain has neither a
+ * key nor a limit and could have answered. The second request is what the
+ * fallback is for.
+ *
+ * <p>
+ * Which failures are which stays the adapter's business — a 404 for a pair the
+ * provider does not publish comes back as {@code null}, not as an exception —
+ * so the catch here is only ever about a provider that could not be reached,
+ * not about a provider that declined to answer.
+ *
+ * <p>
+ * Nothing is hidden by it: {@code ExchangeRateService.fetchAndStore} already
+ * caught everything the chain used to let through, so the transaction is stored
+ * unflagged either way. The change only buys a second provider the chance to be
+ * asked first. The failure is logged at {@code warn} through {@link SafeLog},
+ * because the exception message carries the provider's API key.
  */
 @Component
 @ConditionalOnBean(AppProperties.class)
@@ -106,7 +124,14 @@ public final class ChainedRatesProvider implements RatesProvider {
 	@Override
 	public ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
 		for (RatesProvider provider : this.chain()) {
-			ExchangeRate rate = provider.rateFor(baseCurrency, quoteCurrency, date);
+			ExchangeRate rate;
+			try {
+				rate = provider.rateFor(baseCurrency, quoteCurrency, date);
+			} catch (RuntimeException ex) {
+				log.warn("{} could not be asked for {}/{} on {}; trying the next provider: {}", provider.name(),
+						baseCurrency, quoteCurrency, date, SafeLog.failure(ex));
+				continue;
+			}
 			if (rate != null) {
 				log.debug("{} answered {} for {} on {}", rate.source(), rate.close(),
 						baseCurrency + "/" + quoteCurrency, date);
@@ -130,7 +155,14 @@ public final class ChainedRatesProvider implements RatesProvider {
 	@Override
 	public List<RatesProvider.PublishedCurrency> publishedCurrencies() {
 		for (RatesProvider provider : this.chain()) {
-			List<RatesProvider.PublishedCurrency> published = provider.publishedCurrencies();
+			List<RatesProvider.PublishedCurrency> published;
+			try {
+				published = provider.publishedCurrencies();
+			} catch (RuntimeException ex) {
+				log.warn("{} could not publish its currencies; trying the next provider: {}", provider.name(),
+						SafeLog.failure(ex));
+				continue;
+			}
 			if (!published.isEmpty()) {
 				return published;
 			}
