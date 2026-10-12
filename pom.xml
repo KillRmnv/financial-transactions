@@ -49,7 +49,7 @@
 		     7.0.9 the parent pulls, which is the usual relationship between a library's build and
 		     the framework it is tested against. Keeps the daily sweep to one instance across a
 		     horizontally scaled deployment. -->
-		<shedlock.version>7.9.0</shedlock.version>
+		<shedlock.version>7.10.1</shedlock.version>
 	</properties>
 	<dependencies>
 		<dependency>
