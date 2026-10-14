@@ -43,8 +43,10 @@ public final class ExpenseLimit {
 	@Column(name = "category_id", nullable = false)
 	private Long categoryId;
 
-	// Mirrors the column in V4; see the note on the same field in
-	// ExpenseTransaction.
+	/**
+	 * Mirrors the column in V4; see the note on the same field in
+	 * {@code ExpenseTransaction}, which is where the reason is written out.
+	 */
 	@Column(name = "amount", nullable = false, precision = 20, scale = 8)
 	private BigDecimal amount;
 

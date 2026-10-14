@@ -50,13 +50,22 @@ public final class ExpenseTransaction {
 	@JoinColumn(name = "currency_id", nullable = false)
 	private Currency currency;
 
-	// precision and scale mirror the column in V4 and must be changed with it. They
-	// drifted
-	// once already — four columns still said numeric(14,2) after the migration
-	// widened them to
-	// numeric(20,8) — and nothing noticed until ddl-auto became `validate`. With
-	// `update` the
-	// next drift would have narrowed the columns and quietly rounded every amount.
+	/**
+	 * precision and scale restate the column from V4 and have to be changed with
+	 * it.
+	 *
+	 * <p>
+	 * They drifted once already: four columns still said numeric(14,2) after the
+	 * migration widened them, and nothing noticed until {@code ddl-auto} became
+	 * {@code validate}. Under {@code update} the next drift would have narrowed the
+	 * columns back and quietly rounded every amount.
+	 *
+	 * <p>
+	 * A javadoc block rather than a line comment on purpose: the formatter reflows
+	 * {@code //} comments to its own line width, and it did that to the first
+	 * version of this note into seven fragments broken mid-sentence, which were
+	 * then committed unreadable.
+	 */
 	@Column(name = "amount", nullable = false, precision = 20, scale = 8)
 	private BigDecimal amount;
 
