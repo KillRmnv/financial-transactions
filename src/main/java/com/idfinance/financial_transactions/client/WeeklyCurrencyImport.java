@@ -1,11 +1,13 @@
 package com.idfinance.financial_transactions.client;
 
+import com.idfinance.financial_transactions.config.SchedulerLockConfig;
 import com.idfinance.financial_transactions.entity.ScheduledJob;
 import com.idfinance.financial_transactions.service.CurrencyImporter;
 import com.idfinance.financial_transactions.service.RatesProvider;
 import com.idfinance.financial_transactions.service.ScheduledJobService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -65,6 +67,7 @@ public class WeeklyCurrencyImport {
 	// release,
 	// and one who declines to pay at all switches the row off instead.
 	@Scheduled(cron = "${app.scheduling.weekly-currency-import.cron:0 30 4 * * MON}", zone = "${app.month-timezone}")
+	@SchedulerLock(name = SchedulerLockConfig.Names.WEEKLY_CURRENCY_IMPORT, lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
 	@Transactional
 	public void refreshCurrencies() {
 		if (!this.scheduledJobService.isEnabled(ScheduledJob.Names.WEEKLY_CURRENCY_IMPORT)) {

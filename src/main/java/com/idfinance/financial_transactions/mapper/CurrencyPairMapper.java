@@ -1,5 +1,7 @@
 package com.idfinance.financial_transactions.mapper;
 
+import com.idfinance.financial_transactions.dto.CurrencyPairResponse;
+import com.idfinance.financial_transactions.entity.CurrencyPair;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
@@ -23,7 +25,6 @@ public interface CurrencyPairMapper {
 	@Mapping(target = "code", source = "pair.baseCurrency.code")
 	@Mapping(target = "active", source = "pair.active")
 	@Mapping(target = "createdAt", source = "pair.createdAt")
-	com.idfinance.financial_transactions.dto.CurrencyPairResponse toResponse(
-			com.idfinance.financial_transactions.entity.CurrencyPair pair);
+	CurrencyPairResponse toResponse(CurrencyPair pair);
 
 }

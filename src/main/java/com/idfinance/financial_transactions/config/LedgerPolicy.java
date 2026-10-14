@@ -55,16 +55,33 @@ public record LedgerPolicy(String currencyCode, int amountScale) {
 	public static final int MAX_AMOUNT_FRACTION_DIGITS = 8;
 
 	/**
-	 * The largest sum the API accepts: eleven integer digits and eight fraction
-	 * ones.
+	 * The width of the columns an amount is written to: {@code numeric(20, 8)},
+	 * which is twelve integer digits and eight fraction ones.
+	 *
+	 * <p>
+	 * Declared as two numbers rather than as the literal
+	 * {@code 999999999999.99999999} because the literal and the column are two
+	 * independent statements about the same limit, and they are already known to
+	 * have drifted apart once: V4 widened these columns from {@code numeric(14, 2)}
+	 * and the ceiling kept the old value, silently. Change these two constants
+	 * together with the migration, and a test holds the derived value to the number
+	 * it is supposed to be.
 	 */
-	public static final BigDecimal MAX_AMOUNT = new BigDecimal("99999999999.99999999");
+	private static final int STORAGE_INTEGER_DIGITS = 20 - MAX_AMOUNT_FRACTION_DIGITS;
 
 	/**
-	 * The largest converted total the ledger column holds, {@code numeric(20, 8)}:
-	 * twelve integer digits and eight fraction ones.
+	 * The largest converted total the ledger column holds, built from the width
+	 * above rather than written out.
 	 */
-	private static final BigDecimal STORAGE_CEILING = new BigDecimal("999999999999.99999999");
+	private static final BigDecimal STORAGE_CEILING = ceilingOf(STORAGE_INTEGER_DIGITS, MAX_AMOUNT_FRACTION_DIGITS);
+
+	/**
+	 * The largest value a {@code numeric(precision, scale)} column holds: nine in
+	 * every digit.
+	 */
+	private static BigDecimal ceilingOf(int integerDigits, int fractionDigits) {
+		return new BigDecimal("9".repeat(integerDigits) + "." + "9".repeat(fractionDigits));
+	}
 
 	/**
 	 * Whether an amount is too large to store once converted.

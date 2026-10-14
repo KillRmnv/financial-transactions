@@ -116,6 +116,18 @@ class PureDecisionSteps {
 		Assertions.assertThat(this.ledgerPolicy.isLedgerCurrency(code)).as("%s is the ledger currency", code).isFalse();
 	}
 
+	@Then("{string} is within the storage ceiling")
+	void amountIsWithinTheStorageCeiling(String amount) {
+		Assertions.assertThat(this.ledgerPolicy.exceedsStorageCeiling(new BigDecimal(amount)))
+				.as("%s against the widest value numeric(20, 8) holds", amount).isFalse();
+	}
+
+	@Then("{string} is past the storage ceiling")
+	void amountIsPastTheStorageCeiling(String amount) {
+		Assertions.assertThat(this.ledgerPolicy.exceedsStorageCeiling(new BigDecimal(amount)))
+				.as("%s against the widest value numeric(20, 8) holds", amount).isTrue();
+	}
+
 	private static DateTimeFormatter utcFormatter() {
 		return DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneId.of("UTC"));
 	}

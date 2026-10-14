@@ -94,6 +94,17 @@ public final class SchedulerLockConfig {
 		 */
 		public static final String DAILY_RATES = "daily-rates";
 
+		/**
+		 * The weekly currency import takes its own lock, named after the
+		 * {@code scheduled_job} row it consults so the two are visibly the same thing.
+		 *
+		 * <p>
+		 * It is a second holder rather than a shared one: the two jobs run at different
+		 * hours on different days, and one lock between them would let a slow import
+		 * suppress a rate sweep, which is the one that has to happen daily.
+		 */
+		public static final String WEEKLY_CURRENCY_IMPORT = "weekly-currency-import";
+
 		private Names() {
 		}
 

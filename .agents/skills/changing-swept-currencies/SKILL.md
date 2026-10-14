@@ -91,15 +91,15 @@ right for "no scheduler in a test" and wrong for "stop paying for a call".
 
 ## Defects that pass review
 
-**The sweep runs once per context, and that is the lock doing its job.** `refreshDaily`
-carries `lockAtMostFor = "PT10M"`, and ShedLock keeps a process-wide registry of locks it
-has taken — it consults that before touching the database at all. A second call in the
-same JVM is therefore refused silently: no log line, no error, the method body simply
-not invoked. `features/service/daily_rate_sweep.feature` is one scenario for exactly that
-reason, and it was one feature that could not be written as three scenarios until this
-was found. **Do not add `shedlock` to `StoredWorldCleaner`**: deleting the row while the
-registry still believes it exists leaves the provider skipping the insert, attempting an
-update that matches nothing, and refusing the lock — a state it cannot recover from.
+**A job with `@SchedulerLock` is called through its target object in a scenario.**
+`refreshDaily` holds the lock for ten minutes and ShedLock remembers a lock it has taken in a
+process-wide registry, so a second call in one context is refused silently — no log, no error, the
+body never runs. The steps call `AopTestUtils.getTargetObject(...)` for that reason: the lock is
+about several replicas, and a suite is one process. Adding `@SchedulerLock` to the weekly import
+without doing the same broke five `currency_sweep.feature` scenarios, every one of them passing
+against an import that had not run. `StoredWorldCleaner` deliberately does **not** empty
+`shedlock` either: deleting the row while the registry still believes it exists leaves the
+provider skipping the insert, attempting an update that matches nothing, and refusing the lock.
 
 **`PricingDay` shortens the weekend before anyone is asked, and holidays stay two
 requests.** A Saturday asked for directly costs two provider calls — the day's own, then

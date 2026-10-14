@@ -21,6 +21,7 @@ import java.util.Set;
 import org.assertj.core.api.Assertions;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.util.AopTestUtils;
 
 /**
  * Steps for the weekly sweep of the currency lookup.
@@ -176,7 +177,16 @@ class CurrencySweepSteps {
 
 	@When("the weekly sweep runs")
 	void theWeeklySweepRuns() {
-		this.weeklyCurrencyImport.getObject().refreshCurrencies();
+		// Through the target object, past the @SchedulerLock advice. The lock exists so
+		// that several replicas do not each pay for the same call, and a suite is one
+		// process — where the lock is not merely redundant but obstructive: it is held
+		// for a minute after the first scenario, so every later one would silently call
+		// a job that did nothing and the scenario would pass against an import that
+		// never
+		// ran. Adding the lock to this job broke five scenarios that way, which is what
+		// this line is here to stop.
+		((WeeklyCurrencyImport) AopTestUtils.getTargetObject(this.weeklyCurrencyImport.getObject()))
+				.refreshCurrencies();
 	}
 
 	@Given("the size of the currency lookup is noted")

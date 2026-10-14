@@ -20,11 +20,11 @@ Feature: The daily sweep stores the day somebody will ask for
   2026-10-01 and nobody asks for it. All three dates are asserted, because a sweep
   writing any one of them instead of 2026-10-09 satisfies none of the claims below.
 
-  One scenario rather than three, and that is the job's own doing: `refreshDaily`
-  carries `lockAtMostFor = "PT10M"`, so the first call in a context holds the lock for
-  ten minutes and every later one is refused in silence. Ten minutes is what stops two
-  replicas paying twice for the same rate, so the constraint is the feature and not
-  something to route around.
+  One scenario rather than three, and not because of the lock: the step calls the job
+  through its target object, past the @SchedulerLock advice, so the sweep can run once
+  per claim here. It is one scenario because all three claims are about the same run —
+  what the sweep wrote, that a transaction reads that row, and that a day it did not
+  reach still costs a call. Splitting them would let each pass against a different one.
 
   Scenario: The sweep stores the day that prices yesterday, and that row is what the transaction reads
     Given the account "0000000123" and the category "product"

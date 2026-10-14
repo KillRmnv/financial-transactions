@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.util.Optional;
 import org.assertj.core.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.util.AopTestUtils;
 
 /**
  * Steps for the daily job that prefetches the rates of the tracked currencies.
@@ -61,7 +62,16 @@ class DailyRateSweepSteps {
 
 	@When("the daily rate sweep runs")
 	void theDailyRateSweepRuns() {
-		this.scheduledRatesFetcher.refreshDaily();
+		// Past the @SchedulerLock advice, for the reason given in CurrencySweepSteps:
+		// the
+		// lock protects a deployment of several replicas and a suite is one process.
+		// Here
+		// it would hold the lock for a minute and silently skip every scenario after
+		// the
+		// first, which is also why this feature is a single scenario rather than a way
+		// of
+		// measuring the cost of the advice.
+		((ScheduledRatesFetcher) AopTestUtils.getTargetObject(this.scheduledRatesFetcher)).refreshDaily();
 	}
 
 	/**

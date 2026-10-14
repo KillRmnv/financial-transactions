@@ -57,3 +57,18 @@ Feature: What the ledger configuration refuses
     Given the ledger is configured with currency "EUR" and a scale of 2
     Then "EUR" is a ledger currency
     And "USD" is not a ledger currency
+
+  # The ceiling is derived from the column's width rather than written out, so the two
+  # cannot drift apart again — which means it has to be pinned to the value it is
+  # supposed to equal, or nothing would notice a second drift. It has already drifted
+  # once: V4 widened the columns from numeric(14, 2) and this stayed at the old width,
+  # and nothing read it until the schema was validated against the entities.
+  #
+  # The scale is irrelevant to the ceiling and is set to 8 only because the ceiling is
+  # a column and not a rounding rule; setting it to 2 would make a reader wonder
+  # whether the two are related.
+  Scenario: The storage ceiling is the widest value the column holds
+    Given the ledger is configured with currency "USD" and a scale of 8
+    Then "999999999999.99999999" is within the storage ceiling
+    And "1000000000000.00000000" is past the storage ceiling
+    And "-1000000000000.00000000" is past the storage ceiling

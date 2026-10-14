@@ -111,10 +111,14 @@ public class StoredWorldCleaner {
 	 * not run, for as long as the registry entry lasts.
 	 *
 	 * <p>
-	 * The consequence for the suite is that {@code refreshDaily} can be called once
-	 * per context, because the annotation holds the lock for ten minutes by design
-	 * — which is the same property that stops two replicas paying for the same
-	 * rate. The scenarios about it live in one feature for that reason.
+	 * The consequence for the suite is that a job carrying {@code @SchedulerLock}
+	 * cannot be called twice in a context — not by emptying the table, which only
+	 * makes it worse, and not by waiting. {@code CurrencySweepSteps} and
+	 * {@code DailyRateSweepSteps} call the target object instead, past the advice,
+	 * because the lock protects a deployment of several replicas and a suite is one
+	 * process. Adding {@code @SchedulerLock} to the weekly import without that
+	 * broke five scenarios at once, all of them passing against a job that had done
+	 * nothing.
 	 */
 
 	/**

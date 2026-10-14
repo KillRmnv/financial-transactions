@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionMessage;
 import org.springframework.boot.autoconfigure.condition.ConditionOutcome;
 import org.springframework.boot.autoconfigure.condition.SpringBootCondition;
 import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
 /**
@@ -37,7 +38,7 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
  */
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
-@org.springframework.context.annotation.Conditional(ProviderConfiguredCondition.class)
+@Conditional(ProviderConfiguredCondition.class)
 public @interface ConditionalOnProviderConfigured {
 
 	/** The provider's key under {@code app.rates.providers}. */
