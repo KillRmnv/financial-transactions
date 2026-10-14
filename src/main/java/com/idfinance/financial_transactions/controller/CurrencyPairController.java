@@ -17,8 +17,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -67,7 +67,14 @@ public final class CurrencyPairController {
 	@ApiResponse(responseCode = "200", description = "The currency is now tracked as requested")
 	@ApiResponse(responseCode = "400", description = "The code is not three letters, or the body has no active flag", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "The currency is not in the lookup, so tracking it would sweep a currency that cannot be priced", content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
-	@PutMapping("/{code}")
+	// PATCH rather than PUT, and the body is the reason: the request carries one
+	// field
+	// of one resource, which is a partial update by definition. PUT would claim the
+	// whole membership were being replaced, and a client reading the specification
+	// of
+	// both verbs has a reasonable claim that a missing field means "clear it" — a
+	// currency with no `active` is rejected here rather than silently swept.
+	@PatchMapping("/{code}")
 	ResponseEntity<CurrencyPairResponse> setActive(
 			@Parameter(description = "ISO 4217 code, in any case", example = "KZT") @PathVariable("code") String code,
 			@Valid @RequestBody CurrencyPairRequest request) {

@@ -724,7 +724,7 @@ class ApiSteps {
 	}
 
 	private void setTracked(String code, boolean active) {
-		this.response = this.exchange(this.client().put().uri("/api/v1/currency-pairs/" + code, new Object[0])
+		this.response = this.exchange(this.client().patch().uri("/api/v1/currency-pairs/" + code, new Object[0])
 				.body(Map.of("active", active)));
 		this.responseBody = this.readBody();
 	}
