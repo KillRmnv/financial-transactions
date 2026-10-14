@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -55,14 +54,32 @@ final class RateLimitInterceptor implements HandlerInterceptor {
 
 	private final MetricsRecorder metricsRecorder;
 
+	/**
+	 * Whether an endpoint is limited, read on every request.
+	 *
+	 * <p>
+	 * {@code getAnnotation} rather than
+	 * {@code AnnotatedElementUtils.findMergedAnnotation}: the merged search walks
+	 * meta-annotations and bridge methods to build a synthetic annotation out of
+	 * several sources, and {@code @RateLimited} is used on a handler method or on a
+	 * controller class and nowhere else. For the majority of requests the second
+	 * answer is null, so this is one reflective lookup on a method that has no
+	 * annotation — microseconds beside the JSON parsing and the database round trip
+	 * the same request goes on to make.
+	 *
+	 * <p>
+	 * An endpoint that is not limited is therefore one lookup, not a lookup per
+	 * candidate. If a composed annotation for this is ever introduced, this has to
+	 * become the merged search again, and the cost returns with it.
+	 */
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
 		if (!(handler instanceof HandlerMethod method)) {
 			return true;
 		}
-		RateLimited limits = AnnotatedElementUtils.findMergedAnnotation(method.getMethod(), RateLimited.class);
+		RateLimited limits = method.getMethod().getAnnotation(RateLimited.class);
 		if (limits == null) {
-			limits = AnnotatedElementUtils.findMergedAnnotation(method.getBeanType(), RateLimited.class);
+			limits = method.getBeanType().getAnnotation(RateLimited.class);
 		}
 		if (limits == null) {
 			return true;

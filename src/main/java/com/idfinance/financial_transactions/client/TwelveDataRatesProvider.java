@@ -137,16 +137,16 @@ public final class TwelveDataRatesProvider implements RatesProvider {
 	 * published the way they are asked for.
 	 */
 	@Override
-	public ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
+	public Optional<ExchangeRate> rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
 		Optional<ExchangeRate> direct = askFor(baseCurrency + "/" + quoteCurrency, baseCurrency, quoteCurrency, date);
 		if (direct.isPresent()) {
-			return direct.get();
+			return direct;
 		}
 
 		log.info("{} publishes no {}/{}, asking for the pair the other way round", source(), baseCurrency,
 				quoteCurrency);
-		return askFor(quoteCurrency + "/" + baseCurrency, quoteCurrency, baseCurrency, date).map(ExchangeRate::inverted)
-				.orElse(null);
+		return askFor(quoteCurrency + "/" + baseCurrency, quoteCurrency, baseCurrency, date)
+				.map(ExchangeRate::inverted);
 	}
 
 	/**

@@ -222,12 +222,8 @@ public class ScheduledRatesFetcher {
 	private Fetched fetch(Currency base, String quote, LocalDate date) {
 		String code = base.getCode();
 		try {
-			// Through the coordinator for the same reason the transaction path is: a
-			// transaction
-			// arriving while the sweep is asking pays for nothing if it can join this call
-			// instead.
 			Optional<ExchangeRate> answer = this.rateFetchCoordinator.rateFor(code, quote, date,
-					() -> Optional.ofNullable(this.ratesProvider.rateFor(code, quote, date)));
+					() -> this.ratesProvider.rateFor(code, quote, date));
 			ExchangeRate rate = answer.orElse(null);
 			if (rate == null) {
 				log.info("No {} published for {} on {}", quote, code, date);

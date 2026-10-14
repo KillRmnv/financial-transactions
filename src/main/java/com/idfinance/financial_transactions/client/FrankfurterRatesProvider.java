@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -94,17 +95,17 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 	 * rather than something to retry.
 	 */
 	@Override
-	public ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
+	public Optional<ExchangeRate> rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
 		String base = normalize(baseCurrency);
 		String quote = normalize(quoteCurrency);
 
 		if (base.equals(quote)) {
-			return ExchangeRate.identity(quote, date);
+			return Optional.of(ExchangeRate.identity(quote, date));
 		}
 
 		Pair answer = this.fetchWithRetry(base, quote, date);
 		if (answer == null) {
-			return null;
+			return Optional.empty();
 		}
 
 		// The date the provider reports is the one that answered. Trusting the
@@ -112,7 +113,7 @@ public final class FrankfurterRatesProvider implements RatesProvider {
 		// instead would file a rate under a day it does not describe, and the monthly
 		// lookup
 		// asks for the first of a month precisely so that a stored rate is found by it.
-		return new ExchangeRate(base, quote, answer.date(), answer.rate(), null, name());
+		return Optional.of(new ExchangeRate(base, quote, answer.date(), answer.rate(), null, name()));
 	}
 
 	@Override

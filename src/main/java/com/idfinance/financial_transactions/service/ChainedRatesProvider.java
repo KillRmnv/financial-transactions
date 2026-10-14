@@ -4,8 +4,11 @@ import com.idfinance.financial_transactions.config.AppProperties;
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import com.idfinance.financial_transactions.logging.SafeLog;
 import java.time.LocalDate;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -122,9 +125,9 @@ public final class ChainedRatesProvider implements RatesProvider {
 	}
 
 	@Override
-	public ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
+	public Optional<ExchangeRate> rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
 		for (RatesProvider provider : this.chain()) {
-			ExchangeRate rate;
+			Optional<ExchangeRate> rate;
 			try {
 				rate = provider.rateFor(baseCurrency, quoteCurrency, date);
 			} catch (RuntimeException ex) {
@@ -132,15 +135,15 @@ public final class ChainedRatesProvider implements RatesProvider {
 						baseCurrency, quoteCurrency, date, SafeLog.failure(ex));
 				continue;
 			}
-			if (rate != null) {
-				log.debug("{} answered {} for {} on {}", rate.source(), rate.close(),
+			if (rate.isPresent()) {
+				log.debug("{} answered {} for {} on {}", rate.get().source(), rate.get().close(),
 						baseCurrency + "/" + quoteCurrency, date);
 				return rate;
 			}
 		}
 
 		log.warn("No provider has a rate for {} on {}", baseCurrency + "/" + quoteCurrency, date);
-		return null;
+		return Optional.empty();
 	}
 
 	/**
@@ -198,7 +201,7 @@ public final class ChainedRatesProvider implements RatesProvider {
 	 * added to every adapter to solve one injection point.
 	 */
 	private List<RatesProvider> chain() {
-		Map<String, Integer> orders = new java.util.HashMap<>();
+		Map<String, Integer> orders = new HashMap<>();
 		// Keyed by the name a provider answers to, not by the key it was configured
 		// under: a block may override its name — a sandbox deployment writes
 		// `twelvedata-sandbox` into currency_rate.source — and a map keyed by the
@@ -206,8 +209,8 @@ public final class ChainedRatesProvider implements RatesProvider {
 		// last, which puts the paid provider behind the free one for no visible
 		// reason.
 		this.properties.rates().providers().forEach((key, provider) -> orders.put(provider.name(), provider.order()));
-		return this.others.orderedStream().filter(provider -> provider != this).sorted(
-				java.util.Comparator.comparingInt(provider -> orders.getOrDefault(provider.name(), Integer.MAX_VALUE)))
+		return this.others.orderedStream().filter(provider -> provider != this)
+				.sorted(Comparator.comparingInt(provider -> orders.getOrDefault(provider.name(), Integer.MAX_VALUE)))
 				.toList();
 	}
 

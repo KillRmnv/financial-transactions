@@ -13,7 +13,7 @@ into the wrong place — see **Where this used to break** below.
 
 | Concern | Where |
 |---|---|
-| What a provider must implement | `service/RatesProvider`: `rateFor`, `name`, and optionally `publishedCurrencies` |
+| What a provider must implement | `service/RatesProvider`: `rateFor` (returns `Optional<ExchangeRate>`), `name`, and optionally `publishedCurrencies` |
 | Who asks whom, and in what order | `service/ChainedRatesProvider` — no edits needed |
 | Whether any provider exists at all | `service/ProvidersConfigured` — no edits needed |
 | Whether *this* provider is configured | `service/ConditionalOnProviderConfigured` |

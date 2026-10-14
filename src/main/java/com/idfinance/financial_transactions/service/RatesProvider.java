@@ -2,6 +2,7 @@ package com.idfinance.financial_transactions.service;
 
 import com.idfinance.financial_transactions.domain.ExchangeRate;
 import java.time.LocalDate;
+import java.util.Optional;
 
 /**
  * The contract every exchange rate provider implements, whatever API it speaks.
@@ -22,12 +23,23 @@ import java.time.LocalDate;
 public interface RatesProvider {
 
 	/**
-	 * @return the rate for the pair and day, or null when the provider has no data
+	 * @return the rate for the pair and day, or empty when the provider has no data
 	 *         for it
 	 * @throws RuntimeException
 	 *             on a transport or provider failure, after exhausting retries
+	 *
+	 *             <p>
+	 *             Optional rather than a nullable return, and the distinction is
+	 *             the whole point of it: "the provider answered that it has
+	 *             nothing" and "the provider could not be reached" are two
+	 *             different outcomes here, and the first is what makes a chain ask
+	 *             the next provider. A {@code null} said both at once, so the
+	 *             fallback was one line of {@code if (rate != null)} that read as a
+	 *             null check rather than as the rule it was. A failure throws and
+	 *             is caught one level up, deliberately — it must not be mistaken
+	 *             for an absence.
 	 */
-	ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date);
+	Optional<ExchangeRate> rateFor(String baseCurrency, String quoteCurrency, LocalDate date);
 
 	/**
 	 * @return a short stable identifier of this provider, stored alongside every

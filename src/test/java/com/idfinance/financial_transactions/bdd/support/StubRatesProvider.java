@@ -6,6 +6,7 @@ import com.idfinance.financial_transactions.service.RatesProvider;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * A rates provider that answers from a scenario's instructions instead of a
@@ -87,22 +88,22 @@ public class StubRatesProvider implements RatesProvider {
 	}
 
 	@Override
-	public ExchangeRate rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
+	public Optional<ExchangeRate> rateFor(String baseCurrency, String quoteCurrency, LocalDate date) {
 		// Counted on entry rather than on a successful answer: a scenario asserting
 		// that
 		// the caller never reached the provider is asserting this was not entered, and
 		// an entry that then threw still cost the round trip.
 		this.rateCalls++;
 		if (this.ledgerPolicy.isLedgerCurrency(baseCurrency)) {
-			return ExchangeRate.identity(baseCurrency, date);
+			return Optional.of(ExchangeRate.identity(baseCurrency, date));
 		}
 		if (this.mode == Mode.FAILING) {
 			throw new IllegalStateException("The rates provider is unreachable");
 		}
 		if (this.mode == Mode.ANSWERING) {
-			return new ExchangeRate(baseCurrency, quoteCurrency, date, ANSWERED, null, name());
+			return Optional.of(new ExchangeRate(baseCurrency, quoteCurrency, date, ANSWERED, null, name()));
 		}
-		return null;
+		return Optional.empty();
 	}
 
 	@Override
