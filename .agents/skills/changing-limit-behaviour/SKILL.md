@@ -63,11 +63,11 @@ leave a 1000 USD default sitting beside an installed 2000 USD limit — harmless
 
 ## Commands
 
-Detect the JDK before building anything. Do not hardcode a path, and do not read the two installed
-versions as "the pom wants 25, so 27 is wrong" — on this machine **JDK 27 is the only usable one**,
-because `javac` 21 rejects `--release 25` outright. CI installs 25 because that is what the pom
-targets, and a difference that only shows up there is a compilation or annotation-processing
-failure with no useful context.
+Detect the JDK before building anything. Do not hardcode a path, and do not read the two versions
+installed here as a contradiction of the pom: the pom targets 25 and a build host may have any LTS
+from 21 to 25. This machine happens to carry 21 and 27 — and 21 is the one that cannot build, since
+`javac` 21 rejects `--release 25`, so the local build uses 27. That is a fact about this machine, not
+about the supported range, and the range is what a server should be judged against.
 
 ```bash
 java -version 2>&1 | head -1           # what is on PATH
@@ -83,7 +83,7 @@ runs the build it is enough to call it:
 ./scripts/ci.sh -Dtest=Foo       # pass Maven arguments through
 ```
 
-Targeted runs, after exporting the JDK that can compile `--release 25`:
+Targeted runs, after exporting a JDK that can compile `--release 25`:
 
 ```bash
 ./mvnw test -Dtest=ServiceFeatureTest                      # truth table against PostgreSQL, ~30 s

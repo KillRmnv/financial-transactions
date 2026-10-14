@@ -150,10 +150,10 @@ history is about a year on the free tier. Details and measurements: `docs/curren
 
 ## Commands
 
-Detect the JDK before building anything. Do not hardcode a path, and do not treat the two versions
-installed here as a contradiction of the pom: `javac` 21 rejects `--release 25`, so **JDK 27 is the
-only usable JDK on this machine**, while CI installs 25 because that is what the pom targets. A
-failure that only appears there reads like a compilation or annotation-processing bug.
+Detect the JDK before building anything. Do not hardcode a path: the pom targets 25 and a build host
+may have any LTS from 21 to 25. This machine happens to carry 21 and 27, and 21 is the one that
+cannot build — `javac` 21 rejects `--release 25` — so the local build uses 27. That is a fact about
+this machine, not about the supported range.
 
 ```bash
 java -version 2>&1 | head -1
