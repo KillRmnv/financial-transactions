@@ -7,14 +7,29 @@ description: Use when using the GitHub or PostgreSQL MCP servers, when a tool er
 
 ## Config files
 
-`.mcp.json` at the repository root is the **Claude Code** format: `mcpServers`, an `env` block,
-`command` as separate keys. OpenCode ignores it — `opencode mcp list` answers *No MCP servers
-configured*. OpenCode wants the key `mcp`, `"type": "local" | "remote"` on every entry, `command` as
-**one array** of executable plus arguments, and `environment` rather than `env`.
+Three files, all three servers, two different schemas. They are kept deliberately and none of them
+is redundant.
 
-Both are kept deliberately. `opencode.json` in the project root carries Context7, which is tied to
-this repository's dependencies; `~/.config/opencode/opencode.jsonc` carries GitHub and PostgreSQL,
-which are personal and carry a token.
+| File | Schema | Servers |
+|---|---|---|
+| `.mcp.json` (repository root) | **Claude Code** — `mcpServers`, an `env` block, `command` as separate keys | context7, github, postgres |
+| `opencode.json` (repository root) | **OpenCode** — key `mcp`, `"type": "local" \| "remote"`, `command` as **one array** of executable plus arguments, `environment` rather than `env` | context7, github, postgres |
+| `~/.config/opencode/opencode.jsonc` | OpenCode, as above | github, postgres |
+
+OpenCode **ignores `.mcp.json`** — `opencode mcp list` answers *No MCP servers configured* — which is
+why the same three servers are written twice rather than once. Claude Code reads only that one, so
+the OpenCode copy would otherwise be invisible to it.
+
+`opencode.json` sits in the repository root and carries **all three**, which makes a clone
+self-contained: the servers a task here needs are defined by the project rather than by whoever
+cloned it. The personal `~/.config/opencode/opencode.jsonc` carries GitHub and PostgreSQL too, and
+that is the part which has to survive leaving this repository — work in another checkout still needs
+them. Context7 is deliberately absent there: it is tied to this repository's dependencies and is
+useless anywhere else.
+
+One difference between the two OpenCode files, and it is deliberate: the project entry sets
+`GITHUB_READ_ONLY: "1"` on the GitHub server, the personal one does not. Working against this
+repository, nothing an agent does through that server should be able to write.
 
 ## PostgreSQL server
 

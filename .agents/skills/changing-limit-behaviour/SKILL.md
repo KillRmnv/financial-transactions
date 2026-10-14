@@ -48,14 +48,26 @@ rate is resolved before the lock: an external call held under a row lock blocks 
 transaction of the client.
 
 **3. The fallback is dated at "now".** It is dated at the epoch. A transaction can arrive dated
-before the service knew the account. `createDefaultIfAbsent` is `insert … on conflict do nothing`
-and must not be simplified into a read-then-write, which lets two concurrent first transactions
-both create a limit.
+before the service knew the account. `createDefaultIfAbsent` is
+`insert … select … where not exists (… created_at <= :at) on conflict do nothing` and must not be
+simplified into a read-then-write, which lets two concurrent first transactions both create a limit.
+
+**4. The `not exists` guard loses its date.** Guarding on the account and category alone looks
+right and fails as a **500**, not as a wrong flag: a limit installed today has a `created_at` of
+today, so a transaction dated before it finds no limit in effect; without the date the fallback is
+not created either, `lockEffectiveOn` finds nothing, and `applyFlag` throws `IllegalStateException`.
+The `not exists` and the `on conflict` are two different guards and both are load-bearing: the
+partial index `ux_expense_limit_default` covers default rows only, so `on conflict` alone would
+leave a 1000 USD default sitting beside an installed 2000 USD limit — harmless to flags, but
+`GET /limits` then reports a limit nobody asked for.
 
 ## Commands
 
-Detect the JDK. Do not hardcode a path: the pom targets 25, CI installs 25, and a machine may have
-any LTS from 21 to 25. Anything outside 21–25 is a wrong answer, not a newer JDK.
+Detect the JDK before building anything. Do not hardcode a path, and do not read the two installed
+versions as "the pom wants 25, so 27 is wrong" — on this machine **JDK 27 is the only usable one**,
+because `javac` 21 rejects `--release 25` outright. CI installs 25 because that is what the pom
+targets, and a difference that only shows up there is a compilation or annotation-processing
+failure with no useful context.
 
 ```bash
 java -version 2>&1 | head -1           # what is on PATH
@@ -71,7 +83,7 @@ runs the build it is enough to call it:
 ./scripts/ci.sh -Dtest=Foo       # pass Maven arguments through
 ```
 
-Targeted runs, after exporting a JDK from 21–25 that can compile `--release 25`:
+Targeted runs, after exporting the JDK that can compile `--release 25`:
 
 ```bash
 ./mvnw test -Dtest=ServiceFeatureTest                      # truth table against PostgreSQL, ~30 s

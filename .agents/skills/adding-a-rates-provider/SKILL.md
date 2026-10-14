@@ -65,9 +65,12 @@ public final class YourProvider implements RatesProvider {
 
 	private static final String PROVIDER = "yours";   // the block's key
 
+	private final AppProperties properties;
+
 	private final RestClient client;
 
 	public YourProvider(AppProperties properties) {
+		this.properties = properties;
 		this.client = RestClient.builder().baseUrl(settings().baseUrl())
 				.requestFactory(requestFactory(properties.rates())).build();
 	}
@@ -78,21 +81,29 @@ public final class YourProvider implements RatesProvider {
 
 	@Override
 	public String name() {
-		return PROVIDER;
+		return settings().name();
 	}
 }
 ```
 
-`name()` must return the name the chain sorts by, which is `settings().name()` — the block key,
-or the `source` override. Returning a hardcoded literal here is the mistake the shared constant
-was removed for.
+The field assignment in the constructor is not optional: `settings()` reads `this.properties`, so
+an adapter that takes `AppProperties` as a parameter without keeping it does not compile, and an
+adapter that keeps it under a different name breaks the moment a second provider is added beside it.
+
+`name()` must return `settings().name()` — the block key, or the `source` override, whichever
+`Rates.Rates` stamped onto the block. Returning a hardcoded literal here is the mistake the shared
+constant was removed for, and it is currently made by exactly one adapter:
+`FrankfurterRatesProvider.name()` returns `PROVIDER` rather than `settings().name()`, so a `source`
+set on that block is ignored and the value stored in `currency_rate.source` is the block key. It is
+latent rather than active — nothing sets `source` on that block today — which is the reason it is
+worth knowing before copying that class. `TwelveDataRatesProvider` gets it right.
 
 ### 3. A scenario in `features/api/rates_fallback.feature`
 
 One scenario per behaviour that is *yours* rather than the chain's: that the chain asks it, that
 it answers in the orientation asked, that its absence falls through. The chain's own behaviour —
-order, falling through on an absence, the source carried on the rate — is already covered and
-does not need repeating per provider.
+order, falling through on an absence **or on a failure**, the source carried on the rate — is
+already covered and does not need repeating per provider.
 
 **The suites pick their stubs on purpose.** `WireMockRatesConfiguration` (HTTP, one WireMock
 server, both adapters pointed at it) is what exercises your request-building; `StubRatesProvider`
