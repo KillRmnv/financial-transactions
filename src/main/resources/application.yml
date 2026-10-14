@@ -9,6 +9,28 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+    hibernate:
+      # Validate, never update. Flyway owns the schema — the migrations are the record of how it
+      # got here — so Hibernate must not be allowed to change it, and `update` is the one value that
+      # would quietly narrow a column back to whatever the entity annotation says and take the data
+      # with it.
+      #
+      # Validation is what makes the entity and the database stop being two independent statements
+      # about the same tables, and it does check the width inside a numeric: switching this on
+      # failed the context on the first run over four columns that had said numeric(14,2) since V4
+      # widened them, and on two tables whose smallserial identifiers the entities declared as
+      # Long. Both had been wrong and neither had mattered until something looked.
+      ddl-auto: validate
+
+  flyway:
+    # Defaults already do all of this, and are named here because the whole schema is these files:
+    # a reader should not have to know that Flyway looks in classpath:db/migration by convention.
+    # `baseline-on-migrate: false` is the deliberate default — an empty database with migrations
+    # present is a broken deployment, and baselining it would start a second history instead.
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    baseline-on-migrate: false
 
 management:
   endpoints:

@@ -43,7 +43,9 @@ public final class ExpenseLimit {
 	@Column(name = "category_id", nullable = false)
 	private Long categoryId;
 
-	@Column(name = "amount", nullable = false, precision = 14, scale = 2)
+	// Mirrors the column in V4; see the note on the same field in
+	// ExpenseTransaction.
+	@Column(name = "amount", nullable = false, precision = 20, scale = 8)
 	private BigDecimal amount;
 
 	/** A limit is always denominated in the currency the ledger is kept in. */

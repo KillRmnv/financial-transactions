@@ -50,7 +50,14 @@ public final class ExpenseTransaction {
 	@JoinColumn(name = "currency_id", nullable = false)
 	private Currency currency;
 
-	@Column(name = "amount", nullable = false, precision = 14, scale = 2)
+	// precision and scale mirror the column in V4 and must be changed with it. They
+	// drifted
+	// once already — four columns still said numeric(14,2) after the migration
+	// widened them to
+	// numeric(20,8) — and nothing noticed until ddl-auto became `validate`. With
+	// `update` the
+	// next drift would have narrowed the columns and quietly rounded every amount.
+	@Column(name = "amount", nullable = false, precision = 20, scale = 8)
 	private BigDecimal amount;
 
 	@Column(name = "category_id", nullable = false)
@@ -78,11 +85,11 @@ public final class ExpenseTransaction {
 	 * still stored, and inventing a converted amount for it would be worse than
 	 * admitting there is none.
 	 */
-	@Column(name = "ledger_sum", precision = 14, scale = 2)
+	@Column(name = "ledger_sum", precision = 20, scale = 8)
 	private BigDecimal sumInLedger;
 
 	/** In ledger units per one unit of the transaction currency. */
-	@Column(name = "applied_rate", precision = 19, scale = 8)
+	@Column(name = "applied_rate", precision = 20, scale = 8)
 	private BigDecimal appliedRate;
 
 	@Column(name = "rate_date")
